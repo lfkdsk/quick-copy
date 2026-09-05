@@ -126,6 +126,33 @@ try {
   if (hits !== 1) throw new Error(`search: expected 1 card, saw ${hits}`)
   pass('search filters across titles, text and tags')
 
+  // The storage dialog's toggle is a <label>, and so are the field
+  // captions around it. A specificity collision once let the caption
+  // rule claim the toggle, stripping its flex layout and collapsing the
+  // track to a 2px inline sliver that sat on top of its own text — so
+  // assert the track's box, not merely that it rendered.
+  await page.locator('.repo-pill').click()
+  await page.locator('.switch').waitFor({ timeout: 5000 })
+  const toggle = await page.evaluate(() => {
+    const sw = document.querySelector('.switch')
+    const track = sw.querySelector('.track').getBoundingClientRect()
+    const label = sw.querySelector('span:last-child').getBoundingClientRect()
+    return {
+      display: getComputedStyle(sw).display,
+      width: Math.round(track.width),
+      height: Math.round(track.height),
+      gap: Math.round(label.left - track.right),
+    }
+  })
+  if (toggle.display !== 'flex')
+    throw new Error(`toggle should lay out as a flex row, got "${toggle.display}"`)
+  if (toggle.width < 24 || toggle.height < 14)
+    throw new Error(`toggle track collapsed to ${toggle.width}x${toggle.height}`)
+  if (toggle.gap < 1)
+    throw new Error(`toggle track overlaps its label (gap ${toggle.gap}px)`)
+  pass('the storage dialog toggle keeps its own layout')
+  await page.getByRole('button', { name: 'Close' }).click()
+
   // A fresh context, because addInitScript would re-seed the token.
   const anon = await browser.newContext()
   const anonPage = await anon.newPage()
