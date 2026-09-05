@@ -26,6 +26,22 @@ export function TopBar({
   onToggleTheme,
 }: TopBarProps) {
   const searchRef = useRef<HTMLInputElement>(null)
+  const barRef = useRef<HTMLElement>(null)
+
+  // Day headings stick directly beneath this bar, and the bar wraps to
+  // two or three rows on a narrow screen — so publish its measured
+  // height rather than hard-coding an offset that phones would get wrong.
+  useEffect(() => {
+    const node = barRef.current
+    if (!node) return
+    const publish = () =>
+      document.documentElement.style.setProperty('--topbar-h', `${node.offsetHeight}px`)
+    publish()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(publish)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   // "/" to search is the one shortcut every app of this shape has.
   useEffect(() => {
@@ -46,7 +62,7 @@ export function TopBar({
   }, [])
 
   return (
-    <header className="topbar">
+    <header className="topbar" ref={barRef}>
       <div className="topbar-inner">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />

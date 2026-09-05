@@ -78,12 +78,24 @@
 
   /* One shared measure for the label style used all over the chrome. */
   --label: 500 10px/1 var(--mono);
+
+  /* Overwritten with the bar's measured height once it mounts; this is
+     only the value used for the first paint. */
+  --topbar-h: 58px;
+
+  /* A trace of paper tooth, painted as a background rather than as an
+     overlay layer: the sticky bar and the day headings are the ground,
+     so they carry the same texture instead of punching smooth bands
+     through it. The tile is random noise, so the fact that a sticky
+     surface scrolls out of step with the ground is invisible. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.14'/%3E%3C/svg%3E");
   --tracking: 0.09em;
 
   color-scheme: light;
 }
 
 [data-theme='dark'] {
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
   --paper: #121110;
   --card: #1a1917;
   --sunk: #100f0e;
@@ -103,7 +115,10 @@
 * { box-sizing: border-box; }
 
 html, body, #root { height: 100%; }
-html { background: var(--paper); }
+html {
+  background-color: var(--paper);
+  background-image: var(--grain);
+}
 
 body {
   margin: 0;
@@ -114,18 +129,6 @@ body {
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
-
-/* A trace of paper tooth. Barely visible, but it stops large flat areas
-   from reading as a blank canvas. */
-.grain {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: 0.5;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.28'/%3E%3C/svg%3E");
-}
-[data-theme='dark'] .grain { opacity: 0.28; }
 
 ::selection { background: var(--accent-wash); color: var(--ink); }
 
@@ -217,7 +220,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
   position: sticky;
   top: 0;
   z-index: 30;
-  background: var(--paper);
+  background-color: var(--paper);
+  background-image: var(--grain);
   border-bottom: 1px solid var(--rule);
 }
 
@@ -454,6 +458,34 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 
 /* ------------------------------------------------------------------- grid */
+
+/* Items are grouped by calendar day, each group its own masonry block
+   under a heading that sticks below the top bar while you scroll it. */
+.day { margin-bottom: 30px; }
+.day:last-child { margin-bottom: 0; }
+
+.day-head {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 9px 0 10px;
+  background-color: var(--paper);
+  background-image: var(--grain);
+  font: var(--label);
+  letter-spacing: var(--tracking);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.day-head::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
 
 .grid {
   columns: 4 250px;

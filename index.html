@@ -17,9 +17,12 @@
     <meta property="og:type" content="website" />
     <style>
       /* Painted before the bundle parses so the first frame is never
-         the wrong colour. Kept in sync with :root in styles.css. */
-      html { background: #f7f5ef; }
-      html[data-theme='dark'] { background: #121110; }
+         the wrong colour. Kept in sync with :root in styles.css.
+         background-color, never the `background` shorthand: the
+         shorthand would also reset background-image, and this selector
+         outranks the stylesheet's `html` rule that paints the grain. */
+      html { background-color: #f7f5ef; }
+      html[data-theme='dark'] { background-color: #121110; }
     </style>
     <script>
       // Resolve the theme before first paint to avoid a light/dark flash.
