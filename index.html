@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Quick Copy — paste anything, keep it in git</title>
+    <meta
+      name="description"
+      content="Save text and images straight into a GitHub repository you own. No server, no database — just commits."
+    />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f7f5ef" media="(prefers-color-scheme: light)" />
+    <meta property="og:title" content="Quick Copy" />
+    <meta property="og:description" content="A clipboard that lives in your own GitHub repository." />
+    <meta property="og:type" content="website" />
+    <style>
+      /* Painted before the bundle parses so the first frame is never
+         the wrong colour. Kept in sync with :root in styles.css. */
+      html { background: #f7f5ef; }
+      html[data-theme='dark'] { background: #121110; }
+    </style>
+    <script>
+      // Resolve the theme before first paint to avoid a light/dark flash.
+      try {
+        var stored = localStorage.getItem('qc.theme')
+        var theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+        document.documentElement.dataset.theme = theme
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light'
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
