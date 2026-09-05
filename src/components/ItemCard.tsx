@@ -9,7 +9,7 @@ import {
   errorMessage,
   formatBytes,
   formatDate,
-  smartDate,
+  timeOfDay,
 } from '../lib/util'
 import type { Notify } from './Toasts'
 import {
@@ -147,7 +147,7 @@ export function ItemCard({
 
       <footer className="card-foot">
         <span className="grow" title={formatDate(item.createdAt)}>
-          {smartDate(item.createdAt)}
+          {timeOfDay(item.createdAt)}
           {item.asset ? ` · ${formatBytes(item.asset.size)}` : ''}
         </span>
         <div className="card-actions">

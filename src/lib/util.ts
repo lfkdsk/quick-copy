@@ -193,16 +193,41 @@ export function errorMessage(error: unknown): string {
   return String(error)
 }
 
+/** Local calendar day, which is what a reader means by "the same day". */
+function localDayKey(date: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
+}
+
+export function dayKey(iso: string): string {
+  return localDayKey(new Date(iso))
+}
+
 /**
- * Recent items read better as "3 hours ago"; older ones as a date you
- * can scan in a column. The cut-over is a week.
+ * Heading for a day's group. The year is dropped for the current year —
+ * it is the same on every heading you are likely to be looking at, so
+ * printing it just adds noise to scan past.
  */
-export function smartDate(iso: string): string {
-  const age = Date.now() - new Date(iso).getTime()
-  if (age < 7 * 86400_000) return timeAgo(iso)
-  return new Date(iso)
-    .toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-    .replace(/,/g, '')
+export function dayLabel(iso: string): string {
+  const now = new Date()
+  const key = dayKey(iso)
+  if (key === localDayKey(now)) return 'Today'
+
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (key === localDayKey(yesterday)) return 'Yesterday'
+
+  const date = new Date(iso)
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'long',
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  })
+}
+
+/** Cards sit under a date heading, so the footer only owes you a time. */
+export function timeOfDay(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 /** Catalogue-style zero padding for the counters in the chrome. */

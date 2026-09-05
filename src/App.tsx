@@ -10,7 +10,7 @@ import {
   updateItem,
   type LoadedItem,
 } from './lib/store'
-import { errorMessage, formatBytes, pad2 } from './lib/util'
+import { dayKey, dayLabel, errorMessage, formatBytes, pad2 } from './lib/util'
 import { Composer, type ComposerPayload } from './components/Composer'
 import { EditDialog } from './components/EditDialog'
 import { ItemCard } from './components/ItemCard'
@@ -331,6 +331,19 @@ export default function App() {
     })
   }, [items, query, kind, tag])
 
+  // `visible` is already newest-first, so consecutive runs of the same
+  // calendar day are exactly the groups.
+  const days = useMemo(() => {
+    const groups: Array<{ key: string; label: string; items: LoadedItem[] }> = []
+    for (const item of visible) {
+      const key = dayKey(item.createdAt)
+      const current = groups[groups.length - 1]
+      if (current?.key === key) current.items.push(item)
+      else groups.push({ key, label: dayLabel(item.createdAt), items: [item] })
+    }
+    return groups
+  }, [visible])
+
   const counts = useMemo(
     () => ({
       all: items.length,
@@ -345,8 +358,7 @@ export default function App() {
   if (phase === 'booting') {
     return (
       <>
-        <Grain />
-        <div className="center-screen">
+          <div className="center-screen">
           <span className="spinner" />
           <span>Checking your GitHub session…</span>
         </div>
@@ -357,8 +369,7 @@ export default function App() {
   if (phase === 'anon' || !client || !user) {
     return (
       <>
-        <Grain />
-        <Login error={authError} />
+          <Login error={authError} />
         <Toasts toasts={toasts} dismiss={dismiss} />
       </>
     )
@@ -366,7 +377,6 @@ export default function App() {
 
   return (
     <>
-      <Grain />
       <TopBar
         user={user}
         repo={repo}
@@ -450,21 +460,26 @@ export default function App() {
         ) : visible.length === 0 ? (
           <EmptyState hasItems={items.length > 0} hasRepo={Boolean(repo)} />
         ) : (
-          <div className="grid">
-            {visible.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                client={client}
-                repo={repo!}
-                notify={notify}
-                onOpen={setViewing}
-                onEdit={setEditing}
-                onDelete={(target) => void handleDelete(target)}
-                onTag={setTag}
-              />
-            ))}
-          </div>
+          days.map((day) => (
+            <section className="day" key={day.key}>
+              <h2 className="day-head">{day.label}</h2>
+              <div className="grid">
+                {day.items.map((item) => (
+                  <ItemCard
+                    key={item.id}
+                    item={item}
+                    client={client}
+                    repo={repo!}
+                    notify={notify}
+                    onOpen={setViewing}
+                    onEdit={setEditing}
+                    onDelete={(target) => void handleDelete(target)}
+                    onTag={setTag}
+                  />
+                ))}
+              </div>
+            </section>
+          ))
         )}
       </div>
 
@@ -512,10 +527,6 @@ export default function App() {
       <Toasts toasts={toasts} dismiss={dismiss} />
     </>
   )
-}
-
-function Grain() {
-  return <div className="grain" aria-hidden="true" />
 }
 
 function EmptyState({ hasItems, hasRepo }: { hasItems: boolean; hasRepo: boolean }) {
