@@ -30,11 +30,24 @@ jobs:
 
       - run: npm ci
 
+      # public/CNAME is what decides where the site is served from: with a
+      # custom domain Pages serves it at the root, without one at
+      # /<repo>/. Deriving the base path from the same file keeps the two
+      # from drifting apart and silently 404-ing every asset.
+      - name: Resolve base path
+        id: base
+        run: |
+          if [ -f public/CNAME ]; then
+            echo "Custom domain: $(cat public/CNAME) — building for /"
+            echo "value=/" >> "$GITHUB_OUTPUT"
+          else
+            echo "No custom domain — building for /${{ github.event.repository.name }}/"
+            echo "value=/${{ github.event.repository.name }}/" >> "$GITHUB_OUTPUT"
+          fi
+
       - run: npm run build
         env:
-          # Project pages are served from /<repo>/. Override this (to "/")
-          # when deploying to a custom domain or a user page.
-          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_BASE: ${{ steps.base.outputs.value }}
 
       - uses: actions/configure-pages@v5
 

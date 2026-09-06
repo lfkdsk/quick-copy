@@ -93,12 +93,46 @@ npm run smoke                         # another
 
 Push to `master`. The workflow in `.github/workflows/deploy.yml` builds
 and publishes to Pages; enable it once under **Settings → Pages →
-Source: GitHub Actions**. The site lands at
-`https://<you>.github.io/quick-copy/`.
+Source: GitHub Actions**. The site is served at
+<https://quick-copy.lfkdsk.org>.
 
-`VITE_BASE` controls the base path and the workflow sets it from the
-repository name. For a custom domain (or a user page served from the
-root), build with `VITE_BASE=/`.
+### The base path follows the custom domain
+
+Pages serves a site with a custom domain from the **root**, and one
+without from `/<repo>/`. Get that wrong and every asset 404s while
+`index.html` still loads, so the page comes up blank.
+
+`public/CNAME` is the single source of truth. It sets the custom domain,
+**and** the workflow reads it to decide the base path:
+
+| `public/CNAME` | served at | `VITE_BASE` |
+| --- | --- | --- |
+| present | `https://<domain>/` | `/` |
+| absent | `https://<you>.github.io/<repo>/` | `/<repo>/` |
+
+So moving off the custom domain is one deletion, not two edits that can
+drift apart.
+
+### Cloudflare in front of Pages
+
+`lfkdsk.org` runs on Cloudflare. If the record for the site is
+**proxied** (orange cloud), the domain resolves to Cloudflare rather than
+to `185.199.108–111.153`, so GitHub cannot verify it and will not issue a
+certificate — Settings → Pages shows an error and *Enforce HTTPS* stays
+unavailable. Visitors are fine, since Cloudflare terminates TLS itself
+and forwards to Pages, but keep Cloudflare's SSL mode on **Full** (not
+Flexible, which redirect-loops against Pages' HTTPS redirect; and not
+Full (strict), which fails because Pages has no certificate for this
+name).
+
+Setting the record to **DNS only** (grey cloud) hands the whole thing
+back to GitHub: the domain verifies, Pages issues a Let's Encrypt
+certificate, and *Enforce HTTPS* works.
+
+Proxied also means Cloudflare caches `index.html`, which is the one file
+that is not content-hashed — so a deploy can keep serving the previous
+bundle reference until that cache expires. Purge it on deploy, or add a
+cache rule that bypasses HTML.
 
 ## Sign-in
 
@@ -116,7 +150,7 @@ Quick Copy ──▶ github.com/login/oauth/authorize
                auth.lfkdsk.org exchanges the code for a token
                         │
                         ▼
-   https://lfkdsk.github.io/quick-copy/#oauth_token=…&state=…
+   https://quick-copy.lfkdsk.org/#oauth_token=…&state=…
 ```
 
 The token comes back in the URL **fragment**, so it never reaches an
@@ -134,8 +168,8 @@ Two things are worth being deliberate about:
 
 ### Pointing it at a different deployment
 
-The defaults in `src/lib/config.ts` target this project's Pages URL.
-Override them at build time if you deploy somewhere else:
+The defaults in `src/lib/config.ts` target this deployment. Override
+them at build time if you deploy somewhere else:
 
 ```sh
 VITE_OAUTH_WORKER_URL=https://auth.lfkdsk.org/quick-copy-staging
@@ -144,7 +178,9 @@ VITE_DEFAULT_REPO=my-clips
 
 A new origin also needs one line in the broker's `PROJECT_ORIGINS` map
 (`lfkdsk/lfkdsk-auth` → `wrangler.toml`) — the allowlist there is what
-stops a token being redirected to somewhere it should not go.
+stops a token being redirected to somewhere it should not go. Changing
+the site's domain means changing that entry too, or sign-in will bounce
+the token back to the old address.
 
 ## Keyboard
 

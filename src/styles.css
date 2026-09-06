@@ -781,7 +781,11 @@ button, input, textarea, select { font: inherit; color: inherit; }
   letter-spacing: -0.02em;
 }
 .dialog > p { margin: 6px 0 20px; color: var(--ink-2); font-size: 13.5px; line-height: 1.65; }
-.dialog label {
+/* Field captions only. The toggle below is also a <label>, but it wraps
+   a control rather than captioning one — and this selector outranks
+   `.switch`, so without the exclusion it would strip the toggle of its
+   flex layout and collapse the track to an inline sliver. */
+.dialog label:not(.switch) {
   display: block;
   margin: 18px 0 7px;
   font: var(--label);
