@@ -15,7 +15,7 @@ try {
   process.exit(1)
 }
 
-const BASE = process.env.QC_BASE_URL || 'http://localhost:4173/quick-copy/'
+const BASE = process.env.QC_BASE_URL || 'http://localhost:4173/'
 const OWNER = 'tester'
 const REPO = 'quick-copy-data'
 const REPO_JSON = {
