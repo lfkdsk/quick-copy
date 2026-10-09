@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { formatBytes, parseTags } from '../lib/util'
-import { CloseIcon, ImageIcon, PlusIcon } from './Icons'
+import { fileBadge, formatBytes, parseTags } from '../lib/util'
+import { CloseIcon, FileIcon, PlusIcon } from './Icons'
 
 export interface ComposerPayload {
   title: string
@@ -14,10 +14,9 @@ interface ComposerProps {
   busy: boolean
   onAttach: (file: File | null) => void
   onSave: (payload: ComposerPayload) => Promise<boolean>
-  onError: (message: string) => void
 }
 
-export function Composer({ attachment, busy, onAttach, onSave, onError }: ComposerProps) {
+export function Composer({ attachment, busy, onAttach, onSave }: ComposerProps) {
   const [text, setText] = useState('')
   const [title, setTitle] = useState('')
   const [tags, setTags] = useState('')
@@ -26,7 +25,7 @@ export function Composer({ attachment, busy, onAttach, onSave, onError }: Compos
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (!attachment) {
+    if (!attachment || !attachment.type.startsWith('image/')) {
       setPreview(null)
       return
     }
@@ -77,7 +76,7 @@ export function Composer({ attachment, busy, onAttach, onSave, onError }: Compos
   }
 
   function handlePaste(event: React.ClipboardEvent) {
-    const file = Array.from(event.clipboardData.files).find((f) => f.type.startsWith('image/'))
+    const file = event.clipboardData.files[0]
     if (!file) return
     event.preventDefault()
     onAttach(file)
@@ -87,22 +86,25 @@ export function Composer({ attachment, busy, onAttach, onSave, onError }: Compos
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-    if (!file.type.startsWith('image/')) {
-      onError('Only image files can be attached right now.')
-      return
-    }
     onAttach(file)
   }
 
   return (
     <section className="composer glass" aria-label="New item">
-      {attachment && preview && (
+      {attachment && (
         <div className="attachment">
-          <img src={preview} alt="" />
+          {preview ? (
+            <img src={preview} alt="" />
+          ) : (
+            <span className="file-thumb">
+              <FileIcon size={20} />
+              <em>{fileBadge(attachment.name)}</em>
+            </span>
+          )}
           <div>
-            <strong>{attachment.name || 'Pasted image'}</strong>
+            <strong>{attachment.name || 'Pasted file'}</strong>
             <small>
-              {attachment.type || 'image'} · {formatBytes(attachment.size)}
+              {attachment.type || 'file'} · {formatBytes(attachment.size)}
             </small>
           </div>
           <button
@@ -129,7 +131,7 @@ export function Composer({ attachment, busy, onAttach, onSave, onError }: Compos
         }}
         placeholder={
           attachment
-            ? 'Add a caption for this image… (optional)'
+            ? 'Add a caption… (optional)'
             : 'Type a note, paste an image, or drop a file anywhere…'
         }
         aria-label="Note text"
@@ -150,21 +152,15 @@ export function Composer({ attachment, busy, onAttach, onSave, onError }: Compos
           placeholder="tags, comma separated"
           aria-label="Tags"
         />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="sr-only"
-          onChange={handlePick}
-        />
+        <input ref={fileInputRef} type="file" className="sr-only" onChange={handlePick} />
         <button
           type="button"
           className="btn"
           onClick={() => fileInputRef.current?.click()}
           disabled={busy}
         >
-          <ImageIcon size={16} />
-          Image
+          <FileIcon size={16} />
+          Attach
         </button>
         <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSave}>
           {busy ? <span className="spinner" /> : <PlusIcon size={16} />}

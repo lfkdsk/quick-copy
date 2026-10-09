@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MAX_ASSET_BYTES } from './lib/config'
+import { MAX_FILE_BYTES, MAX_IMAGE_BYTES } from './lib/config'
 import { GitHubClient, GitHubError, type GitHubUser, type RepoInfo } from './lib/github'
 import { consumeRedirect, signOut, storedToken } from './lib/oauth'
 import {
   deleteItem,
   loadItems,
+  saveFile,
   saveImage,
   saveText,
   updateItem,
@@ -22,8 +23,17 @@ import { Toasts, useToasts } from './components/Toasts'
 import { AlertIcon } from './components/Icons'
 
 type Phase = 'booting' | 'anon' | 'ready'
-type KindFilter = 'all' | 'text' | 'image'
+type KindFilter = 'all' | 'text' | 'image' | 'file'
 type Theme = 'dark' | 'light'
+
+const FILTER_LABELS: Record<KindFilter, string> = {
+  all: 'Everything',
+  text: 'Notes',
+  image: 'Images',
+  file: 'Files',
+}
+
+const TOO_BIG = `Files must be under ${formatBytes(MAX_FILE_BYTES)} — GitHub's per-file limit.`
 
 const REPO_KEY = 'qc.repo'
 const THEME_KEY = 'qc.theme'
@@ -178,6 +188,19 @@ export default function App() {
 
   // ------------------------------------------------- paste & drop anywhere
 
+  /** Refuse oversized files up front rather than after a long read. */
+  const attach = useCallback(
+    (file: File | null) => {
+      if (file && file.size > MAX_FILE_BYTES) {
+        notify(TOO_BIG, 'error')
+        return false
+      }
+      setAttachment(file)
+      return true
+    },
+    [notify],
+  )
+
   const dragDepth = useRef(0)
 
   useEffect(() => {
@@ -193,11 +216,14 @@ export default function App() {
     const onPaste = (event: ClipboardEvent) => {
       // The composer has its own handler; this covers the rest of the page.
       if (isTyping(event.target) || !event.clipboardData) return
-      const file = Array.from(event.clipboardData.files).find((f) => f.type.startsWith('image/'))
+      const file = event.clipboardData.files[0]
       if (!file) return
       event.preventDefault()
-      setAttachment(file)
-      notify('Image attached — add a caption or hit Save', 'info')
+      if (!attach(file)) return
+      notify(
+        `${file.type.startsWith('image/') ? 'Image' : 'File'} attached — add a caption or hit Save`,
+        'info',
+      )
     }
 
     const hasFiles = (event: DragEvent) =>
@@ -220,11 +246,10 @@ export default function App() {
       event.preventDefault()
       dragDepth.current = 0
       setDragging(false)
-      const file = Array.from(event.dataTransfer?.files ?? []).find((f) =>
-        f.type.startsWith('image/'),
-      )
-      if (file) setAttachment(file)
-      else notify('Only image files can be dropped here.', 'error')
+      const files = event.dataTransfer?.files
+      if (!files?.length) return
+      if (files.length > 1) notify('One file at a time — attached the first one.', 'info')
+      attach(files[0]!)
     }
 
     window.addEventListener('paste', onPaste)
@@ -239,7 +264,7 @@ export default function App() {
       window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onDrop)
     }
-  }, [phase, notify])
+  }, [phase, notify, attach])
 
   // ---------------------------------------------------------- mutations
 
@@ -248,20 +273,20 @@ export default function App() {
       setSettingsOpen(true)
       return false
     }
-    if (payload.file && payload.file.size > MAX_ASSET_BYTES) {
-      notify(`Images must be under ${formatBytes(MAX_ASSET_BYTES)}.`, 'error')
+    if (payload.file && payload.file.size > MAX_FILE_BYTES) {
+      notify(TOO_BIG, 'error')
       return false
     }
+    // Oversized images still save, just as a download rather than a thumbnail.
+    const asImage = payload.file?.type.startsWith('image/') && payload.file.size <= MAX_IMAGE_BYTES
 
     setSaving(true)
     try {
+      const draft = { title: payload.title, text: payload.text, tags: payload.tags }
       const saved = payload.file
-        ? await saveImage(client, repo, {
-            title: payload.title,
-            text: payload.text,
-            tags: payload.tags,
-            file: payload.file,
-          })
+        ? asImage
+          ? await saveImage(client, repo, { ...draft, file: payload.file })
+          : await saveFile(client, repo, { ...draft, file: payload.file })
         : await saveText(client, repo, {
             title: payload.title,
             text: payload.text,
@@ -349,6 +374,7 @@ export default function App() {
       all: items.length,
       text: items.filter((item) => item.kind === 'text').length,
       image: items.filter((item) => item.kind === 'image').length,
+      file: items.filter((item) => item.kind === 'file').length,
     }),
     [items],
   )
@@ -389,13 +415,7 @@ export default function App() {
         onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
       />
       <div className="shell">
-        <Composer
-          attachment={attachment}
-          busy={saving}
-          onAttach={setAttachment}
-          onSave={handleSave}
-          onError={(message) => notify(message, 'error')}
-        />
+        <Composer attachment={attachment} busy={saving} onAttach={attach} onSave={handleSave} />
 
         {loadError && (
           <div className="banner">
@@ -418,7 +438,7 @@ export default function App() {
         )}
 
         <div className="filters">
-          {(['all', 'text', 'image'] as const).map((value) => (
+          {(['all', 'text', 'image', 'file'] as const).map((value) => (
             <button
               key={value}
               type="button"
@@ -426,7 +446,7 @@ export default function App() {
               aria-pressed={kind === value}
               onClick={() => setKind(value)}
             >
-              {value === 'all' ? 'Everything' : value === 'text' ? 'Notes' : 'Images'}
+              {FILTER_LABELS[value]}
               <em>{pad2(counts[value])}</em>
             </button>
           ))}
@@ -487,7 +507,7 @@ export default function App() {
         <div className="dropzone">
           <div>
             <strong>Drop to attach</strong>
-            <small>png · jpeg · gif · webp · svg</small>
+            <small>images · any file up to {formatBytes(MAX_FILE_BYTES)}</small>
           </div>
         </div>
       )}
@@ -551,7 +571,8 @@ function EmptyState({ hasItems, hasRepo }: { hasItems: boolean; hasRepo: boolean
       <h2>An empty shelf.</h2>
       <p>
         Write a note above, press <kbd>⌘V</kbd> with a screenshot on the clipboard, or drop an image
-        anywhere on this page. Every save is a commit.
+        or any file up to {formatBytes(MAX_FILE_BYTES)} anywhere on this page. Every save is a
+        commit.
       </p>
     </div>
   )

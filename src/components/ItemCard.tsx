@@ -7,6 +7,7 @@ import {
   copyText,
   download,
   errorMessage,
+  fileBadge,
   formatBytes,
   formatDate,
   timeOfDay,
@@ -18,6 +19,7 @@ import {
   DownloadIcon,
   EditIcon,
   ExpandIcon,
+  FileIcon,
   ImageIcon,
   TrashIcon,
 } from './Icons'
@@ -123,27 +125,48 @@ export function ItemCard({
         </button>
       )}
 
-      <div className="card-body">
-        {item.title && <h3 className="card-title">{item.title}</h3>}
-        {item.text && (
-          <p
-            className={`card-text ${expanded ? 'expanded' : ''}`}
-            onClick={() => setExpanded((value) => !value)}
-            title={expanded ? 'Click to collapse' : 'Click to expand'}
-          >
-            {item.text}
-          </p>
-        )}
-        {item.tags.length > 0 && (
-          <div className="card-tags">
-            {item.tags.map((tag) => (
-              <button key={tag} type="button" className="tag" onClick={() => onTag(tag)}>
-                #{tag}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {item.kind === 'file' && item.asset && (
+        <button
+          type="button"
+          className="card-file"
+          onClick={handleDownload}
+          disabled={busy}
+          aria-label={`Download ${item.asset.name}`}
+        >
+          <span className="file-thumb">
+            {busy ? <span className="spinner" /> : <FileIcon size={20} />}
+            <em>{fileBadge(item.asset.name)}</em>
+          </span>
+          <span className="card-file-name">
+            <strong>{item.asset.name}</strong>
+            <small>{item.asset.mime}</small>
+          </span>
+        </button>
+      )}
+
+      {(item.title || item.text || item.tags.length > 0) && (
+        <div className="card-body">
+          {item.title && <h3 className="card-title">{item.title}</h3>}
+          {item.text && (
+            <p
+              className={`card-text ${expanded ? 'expanded' : ''}`}
+              onClick={() => setExpanded((value) => !value)}
+              title={expanded ? 'Click to collapse' : 'Click to expand'}
+            >
+              {item.text}
+            </p>
+          )}
+          {item.tags.length > 0 && (
+            <div className="card-tags">
+              {item.tags.map((tag) => (
+                <button key={tag} type="button" className="tag" onClick={() => onTag(tag)}>
+                  #{tag}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <footer className="card-foot">
         <span className="grow" title={formatDate(item.createdAt)}>
@@ -151,17 +174,30 @@ export function ItemCard({
           {item.asset ? ` · ${formatBytes(item.asset.size)}` : ''}
         </span>
         <div className="card-actions">
-          <button
-            type="button"
-            className={`card-action ${copied ? 'done' : ''}`}
-            onClick={handleCopy}
-            disabled={busy}
-            title="Copy"
-            aria-label="Copy"
-          >
-            {copied ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
-          </button>
-          {item.kind === 'image' ? (
+          {item.kind !== 'file' && (
+            <button
+              type="button"
+              className={`card-action ${copied ? 'done' : ''}`}
+              onClick={handleCopy}
+              disabled={busy}
+              title="Copy"
+              aria-label="Copy"
+            >
+              {copied ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
+            </button>
+          )}
+          {item.kind === 'file' ? (
+            <button
+              type="button"
+              className="card-action"
+              onClick={handleDownload}
+              disabled={busy}
+              title="Download"
+              aria-label="Download"
+            >
+              <DownloadIcon size={15} />
+            </button>
+          ) : item.kind === 'image' ? (
             <>
               <button
                 type="button"

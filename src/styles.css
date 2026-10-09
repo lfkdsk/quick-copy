@@ -521,6 +521,61 @@ button, input, textarea, select { font: inherit; color: inherit; }
   place-items: center;
   color: var(--ink-3);
 }
+.card-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--sunk);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.card-file:disabled { cursor: progress; }
+.card-file-name { min-width: 0; flex: 1; }
+.card-file-name strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-file-name small {
+  display: block;
+  font: var(--label);
+  letter-spacing: var(--tracking);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A document glyph with the extension stamped under it, standing in for
+   a thumbnail wherever a file is not an image. */
+.file-thumb {
+  width: 54px;
+  height: 54px;
+  flex: none;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 2px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink-2);
+}
+.file-thumb em {
+  font: var(--label);
+  font-style: normal;
+  letter-spacing: var(--tracking);
+  color: var(--accent);
+}
+
 .shimmer {
   background: linear-gradient(100deg, transparent 20%, var(--rule) 50%, transparent 80%);
   background-size: 220% 100%;

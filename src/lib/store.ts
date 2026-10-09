@@ -2,6 +2,7 @@ import { ASSETS_DIR, ITEMS_DIR } from './config'
 import { GitHubClient, GitHubError, type RepoInfo } from './github'
 import { cacheGet, cachePut, jsonCacheGet, jsonCachePut } from './blobCache'
 import {
+  blobToBase64,
   bytesToBase64,
   extensionFor,
   firstLine,
@@ -24,7 +25,7 @@ export interface QCAsset {
 export interface QCItem {
   v: 1
   id: string
-  kind: 'text' | 'image'
+  kind: 'text' | 'image' | 'file'
   title?: string
   text?: string
   tags: string[]
@@ -96,9 +97,9 @@ export async function loadItems(
 function normalise(raw: QCItem, path: string): QCItem | null {
   if (!raw || typeof raw !== 'object') return null
   const id = raw.id || path.slice(ITEMS_DIR.length + 1, -'.json'.length)
-  const kind = raw.kind === 'image' ? 'image' : 'text'
+  const kind = raw.kind === 'image' || raw.kind === 'file' ? raw.kind : 'text'
   if (kind === 'text' && typeof raw.text !== 'string') return null
-  if (kind === 'image' && !raw.asset?.path) return null
+  if (kind !== 'text' && !raw.asset?.path) return null
   return {
     v: 1,
     id,
@@ -208,6 +209,58 @@ export async function saveImage(
   }
 }
 
+export interface FileDraft {
+  title?: string
+  text?: string
+  tags: string[]
+  file: File | Blob
+  fileName?: string
+}
+
+/**
+ * Any file up to GitHub's 100 MiB limit. Same one-commit layout as an
+ * image, but the bytes are never pushed into the IndexedDB cache: a
+ * few large files would crowd out every thumbnail.
+ */
+export async function saveFile(
+  client: GitHubClient,
+  repo: RepoInfo,
+  draft: FileDraft,
+): Promise<LoadedItem> {
+  const id = makeId()
+  const mime = draft.file.type || 'application/octet-stream'
+  const suggested =
+    draft.fileName || (draft.file instanceof File ? draft.file.name : '') || 'file.bin'
+  const name = safeFileName(suggested, 'file.bin')
+  const assetPath = `${ASSETS_DIR}/${id}/${name}`
+
+  const item: QCItem = {
+    v: 1,
+    id,
+    kind: 'file',
+    title: draft.title?.trim() || undefined,
+    text: draft.text?.trim() || undefined,
+    tags: draft.tags,
+    createdAt: new Date().toISOString(),
+    asset: { path: assetPath, name, mime, size: draft.file.size },
+  }
+
+  const descriptor = serialise(item)
+  await client.commit(repo, {
+    message: `Add file: ${item.title || name}`,
+    writes: [
+      { path: assetPath, base64: await blobToBase64(draft.file) },
+      { path: `${ITEMS_DIR}/${id}.json`, base64: utf8ToBase64(descriptor) },
+    ],
+  })
+
+  return {
+    ...item,
+    sha: await gitBlobSha(new TextEncoder().encode(descriptor)),
+    assetSha: await gitBlobSha(new Uint8Array(await draft.file.arrayBuffer())),
+  }
+}
+
 export async function updateItem(
   client: GitHubClient,
   repo: RepoInfo,
@@ -284,13 +337,13 @@ export async function fetchAsset(
 
   if (!blob) {
     if (!item.assetSha) {
-      throw new GitHubError(404, 'The image file is missing from the repository')
+      throw new GitHubError(404, 'The file is missing from the repository')
     }
     const bytes = await client.getBlobBytes(repo, item.assetSha, signal)
     blob = new Blob([bytes], { type: mime })
   }
 
-  if (item.assetSha) await cachePut(item.assetSha, blob)
+  if (item.assetSha && item.kind === 'image') await cachePut(item.assetSha, blob)
   return blob
 }
 

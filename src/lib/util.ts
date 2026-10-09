@@ -12,6 +12,22 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+/**
+ * For large uploads. FileReader encodes natively, which is far faster
+ * and lighter on memory than building a binary string for btoa().
+ */
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const url = String(reader.result)
+      resolve(url.slice(url.indexOf(',') + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read the file'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 export function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64.replace(/\s/g, ''))
   const out = new Uint8Array(binary.length)
@@ -94,6 +110,13 @@ export function extensionFor(mime: string): string {
     'image/bmp': 'bmp',
   }
   return map[mime] || 'bin'
+}
+
+/** Upper-cased extension for a file tile, e.g. "PDF". Empty when there is none. */
+export function fileBadge(name: string): string {
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0 || dot === name.length - 1) return ''
+  return name.slice(dot + 1, dot + 6).toUpperCase()
 }
 
 export function firstLine(text: string, max = 60): string {
