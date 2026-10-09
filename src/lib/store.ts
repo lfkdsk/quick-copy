@@ -309,6 +309,21 @@ export function rawAssetUrl(repo: RepoInfo, path: string): string {
   return `https://raw.githubusercontent.com/${repo.owner}/${repo.name}/${repo.defaultBranch}/${encoded}`
 }
 
+/**
+ * A shareable link to the item's bytes: the asset for images and files,
+ * the JSON descriptor for notes. Public repos get the raw CDN URL, which
+ * works anywhere — curl, <img>, another app. raw.githubusercontent.com
+ * refuses private repos without a token, so those get github.com's
+ * /raw/ route instead: it redirects a signed-in browser to a short-lived
+ * tokenised raw URL, and 404s for everyone else.
+ */
+export function itemUrl(repo: RepoInfo, item: QCItem): string {
+  const path = item.asset?.path ?? `${ITEMS_DIR}/${item.id}.json`
+  if (!repo.isPrivate) return rawAssetUrl(repo, path)
+  const encoded = path.split('/').map(encodeURIComponent).join('/')
+  return `https://github.com/${repo.owner}/${repo.name}/raw/${encodeURIComponent(repo.defaultBranch)}/${encoded}`
+}
+
 export async function fetchAsset(
   client: GitHubClient,
   repo: RepoInfo,

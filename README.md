@@ -65,6 +65,18 @@ Any other file is stored the same way with `"kind": "file"` and no
 dimensions; the card shows its name and extension and downloads it on
 click.
 
+Every card has a **Copy link** button. There is no Quick Copy API —
+the link points straight at the file in the data repo: the asset for
+images and files, the JSON descriptor for notes.
+
+| data repo | link | who can open it |
+| --- | --- | --- |
+| public | `https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>` | anyone, including `curl` |
+| private | `https://github.com/<owner>/<repo>/raw/<branch>/<path>` | a browser signed in to an account with access |
+
+For scripts against a private repo, use the GitHub API with a token:
+`curl -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/<owner>/<repo>/contents/<path>`.
+
 Images are cached in IndexedDB by their git blob SHA — content-addressed,
 so an entry can never be stale. The SHA is computed locally on save
 (`sha1("blob <len>\0" + bytes)`), which is why a just-saved image paints
