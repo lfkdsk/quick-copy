@@ -1,6 +1,7 @@
 # Quick Copy
 
-A clipboard that lives in git. Paste text or drop an image and it is
+A clipboard that lives in git. Paste text, drop an image or any file
+(up to 100 MB) and it is
 committed straight to a GitHub repository you own — no server, no
 database, no vendor. Refresh, switch machines, or open the repo on
 github.com; it is all just files, with a history.
@@ -8,7 +9,7 @@ github.com; it is all just files, with a history.
 - **Static.** Deploys to GitHub Pages from a single Actions workflow.
 - **No backend.** Reads and writes go directly from the browser to the
   GitHub REST API with the signed-in user's token.
-- **Your data.** Items are plain JSON and ordinary image files in a repo
+- **Your data.** Items are plain JSON and ordinary files in a repo
   you control. Delete the app and the data is still there and readable.
 
 ## How it stores things
@@ -60,6 +61,10 @@ in together through the git data API (blobs → tree → commit → ref), so a
 half-written item is not a state the repo can be in. If the branch moved
 underneath a save, the tree is rebuilt on the new head and retried.
 
+Any other file is stored the same way with `"kind": "file"` and no
+dimensions; the card shows its name and extension and downloads it on
+click.
+
 Images are cached in IndexedDB by their git blob SHA — content-addressed,
 so an entry can never be stale. The SHA is computed locally on save
 (`sha1("blob <len>\0" + bytes)`), which is why a just-saved image paints
@@ -80,7 +85,7 @@ npm run dev
 | `npm run smoke` | End-to-end checks against a mocked GitHub API |
 
 The smoke test drives a real browser through sign-in state, listing,
-saving a note, saving an image, filtering and search. Playwright is not
+saving a note, an image and a file, the 100 MB cap, filtering and search. Playwright is not
 a dependency — install it when you want to run the test:
 
 ```sh
@@ -188,16 +193,19 @@ the token back to the old address.
 | --- | --- |
 | `n` | jump to the composer |
 | `⌘`/`Ctrl` + `↵` | save |
-| `⌘`/`Ctrl` + `V` | paste an image anywhere on the page |
+| `⌘`/`Ctrl` + `V` | paste an image or file anywhere on the page |
 | `/` | search |
 | `Esc` | close the viewer or leave the search box |
 
-Dropping an image anywhere on the window attaches it too.
+Dropping an image or any file anywhere on the window attaches it too.
 
 ## Limits
 
-Images are capped at 20 MB client-side — the blobs API takes more, but
-base64 in a JSON body is memory-hungry on both ends and anything past
-that is a poor fit for a clipboard. The GitHub API allows 5,000 requests
+Files are capped at 100 MB — GitHub rejects any single file larger than
+that. Images over 20 MB are still accepted but saved as a plain file
+rather than a thumbnail, so the grid and the image cache stay light;
+plain files are never put in the IndexedDB cache. Uploads go through
+the blobs API as base64 in a JSON body, so a file near the cap takes a
+while and needs a few hundred MB of browser memory while it is sent. The GitHub API allows 5,000 requests
 an hour per user; a listing costs one request plus one per item not yet
 in the local cache.

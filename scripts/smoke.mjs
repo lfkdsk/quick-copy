@@ -7,6 +7,10 @@
 // not have to install a browser. Add it when you want to run this:
 //   npm i -D playwright && npx playwright install chromium
 
+import { rm, truncate, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 let chromium
 try {
   ;({ chromium } = await import('playwright'))
@@ -39,6 +43,8 @@ const SEED = {
 
 const errors = []
 const calls = []
+const commitPayloads = []
+const blobPayloads = []
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
@@ -70,11 +76,17 @@ await context.route('https://api.github.com/**', async (route) => {
   // The blobs endpoint is asked for raw bytes, so the body is the file itself.
   if (path.includes('/git/blobs/'))
     return route.fulfill({ status: 200, body: JSON.stringify(SEED, null, 2) })
-  if (method === 'POST' && path.endsWith('/git/blobs')) return json({ sha: 'newblob' })
+  if (method === 'POST' && path.endsWith('/git/blobs')) {
+    blobPayloads.push(request.postDataJSON())
+    return json({ sha: 'newblob' })
+  }
   if (path.endsWith('/git/ref/heads/main')) return json({ object: { sha: 'headsha' } })
   if (path.includes('/git/commits/')) return json({ tree: { sha: 'basetree' } })
   if (method === 'POST' && path.endsWith('/git/trees')) return json({ sha: 'newtree' })
-  if (method === 'POST' && path.endsWith('/git/commits')) return json({ sha: 'newcommit' })
+  if (method === 'POST' && path.endsWith('/git/commits')) {
+    commitPayloads.push(request.postDataJSON())
+    return json({ sha: 'newcommit' })
+  }
   if (method === 'PATCH' && path.includes('/git/refs/heads/'))
     return json({ object: { sha: 'newcommit' } })
   return json({ message: `unmocked ${method} ${path}` }, 500)
@@ -114,6 +126,45 @@ try {
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('A single pixel').waitFor({ timeout: 10_000 })
   pass('saving an image commits the asset and its descriptor together')
+
+  // Anything that is not an image is kept as a downloadable file.
+  const pdf = Buffer.from('%PDF-1.4\n%fake\n')
+  await page.setInputFiles('input[type=file]', {
+    name: 'notes.pdf',
+    mimeType: 'application/pdf',
+    buffer: pdf,
+  })
+  await page.locator('.attachment').getByText('notes.pdf').waitFor({ timeout: 5000 })
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await page.locator('.card-file').getByText('notes.pdf').waitFor({ timeout: 10_000 })
+  const commitBody = await commitPayloads.at(-1)
+  if (!commitBody?.message?.startsWith('Add file:'))
+    throw new Error(`file save: unexpected commit message ${commitBody?.message}`)
+  if (!blobPayloads.some((blob) => blob.content === pdf.toString('base64')))
+    throw new Error('file save: uploaded bytes do not match the file')
+  pass('saving an arbitrary file commits it and shows a download tile')
+
+  await page.getByRole('button', { name: /Files/ }).click()
+  const fileCards = await page.locator('article.card').count()
+  if (fileCards !== 1) throw new Error(`file filter: expected 1 card, saw ${fileCards}`)
+  await page.getByRole('button', { name: /Everything/ }).click()
+
+  // Over GitHub's 100 MiB per-file limit: refused before any upload.
+  // Playwright caps in-memory buffers at 50 MB, so go through a sparse file.
+  const huge = join(tmpdir(), `qc-smoke-${process.pid}.bin`)
+  await writeFile(huge, '')
+  await truncate(huge, 100 * 1024 * 1024 + 1)
+  const before = calls.length
+  try {
+    await page.setInputFiles('input[type=file]', huge)
+  } finally {
+    await rm(huge, { force: true })
+  }
+  await page.getByText(/Files must be under/).waitFor({ timeout: 10_000 })
+  if ((await page.locator('.attachment').count()) !== 0)
+    throw new Error('oversized file should not be attached')
+  if (calls.length !== before) throw new Error('oversized file should not hit the API')
+  pass('files over 100 MB are refused up front')
 
   await page.getByRole('button', { name: /Images/ }).click()
   const imageCards = await page.locator('article.card').count()

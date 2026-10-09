@@ -28,7 +28,11 @@ export const DEFAULT_REPO = import.meta.env.VITE_DEFAULT_REPO || 'quick-copy-dat
 export const ITEMS_DIR = 'items'
 export const ASSETS_DIR = 'assets'
 
-// GitHub's Contents/Blobs API accepts far more, but base64 in a JSON
-// body is memory-hungry on both ends and anything past this is a poor
-// fit for a clipboard. Enforced client-side with a friendly message.
-export const MAX_ASSET_BYTES = 20 * 1024 * 1024
+// Images are rendered inline and cached in IndexedDB, so they get a
+// tighter budget. A bigger image is still accepted — it is stored as a
+// plain file instead of a thumbnail.
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+// GitHub refuses any single file over 100 MiB, so that is the ceiling
+// for everything else. Enforced client-side with a friendly message.
+export const MAX_FILE_BYTES = 100 * 1024 * 1024
