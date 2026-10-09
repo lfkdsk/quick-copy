@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { GitHubClient, RepoInfo } from '../lib/github'
-import { fetchAsset, type LoadedItem } from '../lib/store'
+import { fetchAsset, itemUrl, type LoadedItem } from '../lib/store'
 import { useAssetUrl, useInView } from '../lib/useAsset'
 import {
   copyImage,
@@ -21,6 +21,7 @@ import {
   ExpandIcon,
   FileIcon,
   ImageIcon,
+  LinkIcon,
   TrashIcon,
 } from './Icons'
 
@@ -78,6 +79,20 @@ export function ItemCard({
       notify(`Copy failed: ${errorMessage(error)}`, 'error')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleCopyLink() {
+    try {
+      await copyText(itemUrl(repo, item))
+      notify(
+        repo.isPrivate
+          ? 'Link copied — it opens only for accounts with access to this private repo.'
+          : 'Link copied to clipboard',
+        'success',
+      )
+    } catch (error) {
+      notify(`Copy failed: ${errorMessage(error)}`, 'error')
     }
   }
 
@@ -186,6 +201,15 @@ export function ItemCard({
               {copied ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
             </button>
           )}
+          <button
+            type="button"
+            className="card-action"
+            onClick={handleCopyLink}
+            title="Copy link"
+            aria-label="Copy link"
+          >
+            <LinkIcon size={15} />
+          </button>
           {item.kind === 'file' ? (
             <button
               type="button"

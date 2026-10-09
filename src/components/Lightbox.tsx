@@ -1,10 +1,10 @@
 import { useEffect } from 'react'
 import type { GitHubClient, RepoInfo } from '../lib/github'
-import { fetchAsset, type LoadedItem } from '../lib/store'
+import { fetchAsset, itemUrl, type LoadedItem } from '../lib/store'
 import { useAssetUrl } from '../lib/useAsset'
-import { copyImage, download, errorMessage, formatBytes, formatDate } from '../lib/util'
+import { copyImage, copyText, download, errorMessage, formatBytes, formatDate } from '../lib/util'
 import type { Notify } from './Toasts'
-import { CloseIcon, CopyIcon, DownloadIcon } from './Icons'
+import { CloseIcon, CopyIcon, DownloadIcon, LinkIcon } from './Icons'
 
 interface LightboxProps {
   item: LoadedItem
@@ -25,8 +25,18 @@ export function Lightbox({ item, client, repo, notify, onClose }: LightboxProps)
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  async function run(action: 'copy' | 'download') {
+  async function run(action: 'copy' | 'link' | 'download') {
     try {
+      if (action === 'link') {
+        await copyText(itemUrl(repo, item))
+        notify(
+          repo.isPrivate
+            ? 'Link copied — it opens only for accounts with access to this private repo.'
+            : 'Link copied to clipboard',
+          'success',
+        )
+        return
+      }
       const blob = await fetchAsset(client, repo, item)
       if (action === 'download') {
         download(blob, item.asset?.name || `${item.id}.bin`)
@@ -61,6 +71,9 @@ export function Lightbox({ item, client, repo, notify, onClose }: LightboxProps)
         </div>
         <button type="button" className="btn btn-ghost" onClick={() => run('copy')}>
           <CopyIcon size={16} /> Copy
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => run('link')}>
+          <LinkIcon size={16} /> Copy link
         </button>
         <button type="button" className="btn btn-ghost" onClick={() => run('download')}>
           <DownloadIcon size={16} /> Download
