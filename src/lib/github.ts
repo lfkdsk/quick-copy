@@ -29,6 +29,12 @@ export interface RepoInfo {
   isPrivate: boolean
   defaultBranch: string
   htmlUrl: string
+  /**
+   * Whether the signed-in user can commit here. Repos owned by someone
+   * else (a collaborator invite, an org) can be read-only; saving to one
+   * would only fail at the first commit.
+   */
+  canPush: boolean
 }
 
 export interface TreeEntry {
@@ -121,12 +127,15 @@ export class GitHubClient {
     )
   }
 
-  /** Owner-affiliated repos, freshest first — for the repo picker. */
+  /**
+   * Every repo the user can commit to — their own, ones they were
+   * invited to, and their orgs' — freshest first, for the repo picker.
+   */
   async listRepos(): Promise<RepoInfo[]> {
     const raw = await this.json<unknown[]>(
-      '/user/repos?per_page=100&sort=updated&affiliation=owner',
+      '/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member',
     )
-    return raw.map(toRepoInfo)
+    return raw.map(toRepoInfo).filter((repo) => repo.canPush)
   }
 
   // ------------------------------------------------------------- contents
@@ -280,6 +289,9 @@ function toRepoInfo(raw: any): RepoInfo {
     isPrivate: Boolean(raw.private),
     defaultBranch: raw.default_branch || 'main',
     htmlUrl: raw.html_url,
+    // `permissions` only comes back on authenticated requests; treat its
+    // absence as "unknown" and let the first commit be the judge.
+    canPush: raw.permissions?.push !== false,
   }
 }
 

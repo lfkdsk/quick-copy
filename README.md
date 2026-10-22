@@ -14,9 +14,19 @@ github.com; it is all just files, with a history.
 
 ## How it stores things
 
-Everything lands in a **separate data repository owned by whoever is
-signed in** — by default `<you>/quick-copy-data`, created on first run.
-This repository holds only the app itself.
+Everything lands in a **separate data repository** — by default
+`<you>/quick-copy-data`, created on first run. This repository holds
+only the app itself.
+
+The data repository does not have to be yours. Type `owner/name` (or
+paste its github.com URL) in the storage dialog to use any repository
+the signed-in account can push to — one you were added to as a
+collaborator, or one in an organisation you belong to. The picker lists
+all of those; read-only repositories are left out, and connecting to one
+by name is refused rather than failing on the first save. New
+repositories are only ever created under your own account. A private
+repository under another owner still needs the `repo` scope, and an
+organisation may also have to approve the OAuth app before it shows up.
 
 ```
 quick-copy-data/
