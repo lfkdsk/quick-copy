@@ -243,14 +243,17 @@ try {
 
   // Repos under another owner: listed when writable, hidden when not,
   // and reachable by typing owner/name or pasting the github.com URL.
+  // The field opens holding the current repo's name; that must not
+  // filter the list down to just that repo.
   const repoField = page.locator('#repo-name')
-  await repoField.fill('')
   const options = page.locator('.repo-option')
   await options.filter({ hasText: 'shared-clips' }).waitFor({ timeout: 5000 })
   if ((await options.filter({ hasText: 'team/' }).count()) !== 1)
     throw new Error('a shared repo should be listed with its owner')
   if ((await options.filter({ hasText: 'readonly' }).count()) !== 0)
     throw new Error('a read-only repo should not be offered')
+  await repoField.fill('team')
+  if ((await options.count()) !== 1) throw new Error('typing should narrow the repo list')
   await repoField.fill('someone/readonly')
   await page.getByRole('button', { name: 'Connect' }).click()
   await page.getByText(/but not commit to it/).waitFor({ timeout: 5000 })
