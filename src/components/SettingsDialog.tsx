@@ -65,6 +65,9 @@ export function SettingsDialog({
   const [busy, setBusy] = useState(false)
   const [missing, setMissing] = useState<RepoRef | null>(null)
   const [repos, setRepos] = useState<RepoInfo[] | null>(null)
+  // The field opens pre-filled with the current repo; filtering the
+  // list by that would hide every other choice. Narrow only once typed.
+  const [typed, setTyped] = useState(false)
 
   const canGoPrivate = canWritePrivateRepos()
 
@@ -81,12 +84,12 @@ export function SettingsDialog({
 
   const suggestions = useMemo(() => {
     if (!repos) return []
-    const needle = name.trim().toLowerCase()
+    const needle = typed ? name.trim().toLowerCase() : ''
     const matches = needle
       ? repos.filter((r) => `${r.owner}/${r.name}`.toLowerCase().includes(needle))
       : repos
     return matches.slice(0, 30)
-  }, [repos, name])
+  }, [repos, name, typed])
 
   async function connect(create: boolean) {
     const ref = parseRepoRef(name, user.login)
@@ -164,6 +167,7 @@ export function SettingsDialog({
             value={name}
             onChange={(event) => {
               setName(event.target.value)
+              setTyped(true)
               setMissing(null)
             }}
             onKeyDown={(event) => event.key === 'Enter' && void connect(false)}
@@ -176,6 +180,10 @@ export function SettingsDialog({
             Connect
           </button>
         </div>
+        <p className="hint">
+          Type <code>owner/name</code> or paste a GitHub URL to use a repository under another
+          account or an organisation you can push to.
+        </p>
 
         {missing &&
           (sameOwner(missing.owner, user.login) ? (
