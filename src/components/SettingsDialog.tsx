@@ -20,6 +20,33 @@ interface SettingsDialogProps {
 }
 
 const VALID_NAME = /^[A-Za-z0-9._-]{1,100}$/
+const VALID_OWNER = /^[A-Za-z0-9-]{1,39}$/
+
+interface RepoRef {
+  owner: string
+  name: string
+}
+
+/**
+ * "name" means one of the user's own repos; "owner/name" (or a pasted
+ * github.com URL) reaches anything else they can write to — a repo they
+ * were invited to, or one in an org.
+ */
+function parseRepoRef(input: string, login: string): RepoRef | null {
+  const cleaned = input
+    .trim()
+    .replace(/^(?:https?:\/\/)?(?:www\.)?github\.com\//i, '')
+    .replace(/\.git$/i, '')
+    .replace(/\/+$/, '')
+  const parts = cleaned.split('/')
+  const [owner, name] = parts.length === 1 ? [login, parts[0]!] : parts.length === 2 ? parts : []
+  if (!owner || !name || !VALID_OWNER.test(owner) || !VALID_NAME.test(name)) return null
+  return { owner, name }
+}
+
+function sameOwner(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
 
 export function SettingsDialog({
   client,
@@ -31,10 +58,12 @@ export function SettingsDialog({
   onClose,
   onSignOut,
 }: SettingsDialogProps) {
-  const [name, setName] = useState(repo?.name ?? DEFAULT_REPO)
+  const [name, setName] = useState(
+    repo ? (sameOwner(repo.owner, user.login) ? repo.name : `${repo.owner}/${repo.name}`) : DEFAULT_REPO,
+  )
   const [isPrivate, setIsPrivate] = useState(canWritePrivateRepos())
   const [busy, setBusy] = useState(false)
-  const [missing, setMissing] = useState(false)
+  const [missing, setMissing] = useState<RepoRef | null>(null)
   const [repos, setRepos] = useState<RepoInfo[] | null>(null)
 
   const canGoPrivate = canWritePrivateRepos()
@@ -53,29 +82,39 @@ export function SettingsDialog({
   const suggestions = useMemo(() => {
     if (!repos) return []
     const needle = name.trim().toLowerCase()
-    const matches = needle ? repos.filter((r) => r.name.toLowerCase().includes(needle)) : repos
+    const matches = needle
+      ? repos.filter((r) => `${r.owner}/${r.name}`.toLowerCase().includes(needle))
+      : repos
     return matches.slice(0, 30)
   }, [repos, name])
 
   async function connect(create: boolean) {
-    const trimmed = name.trim()
-    if (!VALID_NAME.test(trimmed)) {
-      notify('Repository names may only contain letters, numbers, ".", "-" and "_".', 'error')
+    const ref = parseRepoRef(name, user.login)
+    if (!ref) {
+      notify(
+        'Use "name" or "owner/name". Repository names may only contain letters, numbers, ".", "-" and "_".',
+        'error',
+      )
       return
     }
     setBusy(true)
-    setMissing(false)
+    setMissing(null)
     try {
-      const existing = await client.getRepo(user.login, trimmed)
+      const existing = await client.getRepo(ref.owner, ref.name)
       if (existing) {
+        if (!existing.canPush) {
+          notify(`You can read ${existing.owner}/${existing.name} but not commit to it.`, 'error')
+          return
+        }
         onSelect(existing)
         return
       }
-      if (!create) {
-        setMissing(true)
+      // Only the user's own account is a place we create repos in.
+      if (!create || !sameOwner(ref.owner, user.login)) {
+        setMissing(ref)
         return
       }
-      const created = await client.createRepo(trimmed, isPrivate && canGoPrivate)
+      const created = await client.createRepo(ref.name, isPrivate && canGoPrivate)
       notify(`Created ${created.owner}/${created.name}`, 'success')
       onSelect(created)
     } catch (error) {
@@ -105,7 +144,7 @@ export function SettingsDialog({
             <h2>{firstRun ? 'Pick a home for your clips' : 'Storage'}</h2>
             <p style={{ margin: '4px 0 0' }}>
               {firstRun
-                ? 'Everything you save is committed to a repository you own. Nothing is stored anywhere else.'
+                ? 'Everything you save is committed to a repository you can write to. Nothing is stored anywhere else.'
                 : `Signed in as ${user.login}. Items live as files in this repository.`}
             </p>
           </div>
@@ -118,14 +157,14 @@ export function SettingsDialog({
 
         <label htmlFor="repo-name">Repository</label>
         <div className="row">
-          <span className="owner">{user.login}/</span>
+          {!name.includes('/') && <span className="owner">{user.login}/</span>}
           <input
             id="repo-name"
             className="field"
             value={name}
             onChange={(event) => {
               setName(event.target.value)
-              setMissing(false)
+              setMissing(null)
             }}
             onKeyDown={(event) => event.key === 'Enter' && void connect(false)}
             placeholder={DEFAULT_REPO}
@@ -138,16 +177,28 @@ export function SettingsDialog({
           </button>
         </div>
 
-        {missing && (
-          <div className="banner" style={{ marginTop: 12, marginBottom: 0 }}>
-            <span className="grow">
-              No repository named <b>{name.trim()}</b> yet.
-            </span>
-            <button type="button" className="btn" onClick={() => connect(true)} disabled={busy}>
-              Create it
-            </button>
-          </div>
-        )}
+        {missing &&
+          (sameOwner(missing.owner, user.login) ? (
+            <div className="banner" style={{ marginTop: 12, marginBottom: 0 }}>
+              <span className="grow">
+                No repository named <b>{missing.name}</b> yet.
+              </span>
+              <button type="button" className="btn" onClick={() => connect(true)} disabled={busy}>
+                Create it
+              </button>
+            </div>
+          ) : (
+            <div className="banner" style={{ marginTop: 12, marginBottom: 0 }}>
+              <span className="grow">
+                Can't find{' '}
+                <b>
+                  {missing.owner}/{missing.name}
+                </b>
+                . It may not exist, or this sign-in has no access to it
+                {canGoPrivate ? '' : ' (private repositories need private access)'}.
+              </span>
+            </div>
+          ))}
 
         <label className="switch" title={canGoPrivate ? undefined : 'Sign in again with private access to use this'}>
           <input
@@ -170,7 +221,7 @@ export function SettingsDialog({
 
         {suggestions.length > 0 && (
           <>
-            <label>Your repositories</label>
+            <label>Repositories you can write to</label>
             <div className="repo-list">
               {suggestions.map((option) => (
                 <button
@@ -180,7 +231,12 @@ export function SettingsDialog({
                   onClick={() => onSelect(option)}
                 >
                   <RepoIcon size={15} />
-                  <b>{option.name}</b>
+                  <span>
+                    {!sameOwner(option.owner, user.login) && (
+                      <span className="repo-owner">{option.owner}/</span>
+                    )}
+                    <b>{option.name}</b>
+                  </span>
                   {option.isPrivate && <LockIcon size={12} />}
                   <small>{option.defaultBranch}</small>
                 </button>

@@ -29,6 +29,24 @@ const REPO_JSON = {
   default_branch: 'main',
   html_url: `https://github.com/${OWNER}/${REPO}`,
 }
+// Repos owned by someone else: one the tester was given write access
+// to, and one they can only read.
+const SHARED_JSON = {
+  name: 'shared-clips',
+  owner: { login: 'team' },
+  private: true,
+  default_branch: 'main',
+  html_url: 'https://github.com/team/shared-clips',
+  permissions: { push: true },
+}
+const READONLY_JSON = {
+  name: 'readonly',
+  owner: { login: 'someone' },
+  private: false,
+  default_branch: 'main',
+  html_url: 'https://github.com/someone/readonly',
+  permissions: { push: false },
+}
 
 const SEED_SHA = 'aaaa1111'
 const SEED = {
@@ -69,8 +87,12 @@ await context.route('https://api.github.com/**', async (route) => {
 
   if (path === '/user')
     return json({ login: OWNER, name: 'Test User', avatar_url: '', html_url: '' })
-  if (path === '/user/repos') return json([REPO_JSON])
+  if (path === '/user/repos') return json([REPO_JSON, SHARED_JSON, READONLY_JSON])
   if (path === `/repos/${OWNER}/${REPO}`) return json(REPO_JSON)
+  if (path === '/repos/team/shared-clips') return json(SHARED_JSON)
+  if (path === '/repos/someone/readonly') return json(READONLY_JSON)
+  // GitHub answers 404 both for a missing repo and for one you cannot see.
+  if (/^\/repos\/[^/]+\/[^/]+$/.test(path)) return json({ message: 'Not Found' }, 404)
   if (path.endsWith('/git/trees/main'))
     return json({
       tree: [{ path: `items/${SEED.id}.json`, type: 'blob', sha: SEED_SHA, size: 200 }],
@@ -96,7 +118,11 @@ await context.route('https://api.github.com/**', async (route) => {
 })
 
 const page = await context.newPage()
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+page.on('console', (m) => {
+  // The lookup of a repo that does not exist 404s on purpose.
+  if (m.type() !== 'error' || m.location().url.endsWith('/repos/team/nope')) return
+  errors.push(m.text())
+})
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
 
 const pass = (label) => console.log(`  ok  ${label}`)
@@ -214,7 +240,32 @@ try {
   if (toggle.gap < 1)
     throw new Error(`toggle track overlaps its label (gap ${toggle.gap}px)`)
   pass('the storage dialog toggle keeps its own layout')
-  await page.getByRole('button', { name: 'Close' }).click()
+
+  // Repos under another owner: listed when writable, hidden when not,
+  // and reachable by typing owner/name or pasting the github.com URL.
+  const repoField = page.locator('#repo-name')
+  await repoField.fill('')
+  const options = page.locator('.repo-option')
+  await options.filter({ hasText: 'shared-clips' }).waitFor({ timeout: 5000 })
+  if ((await options.filter({ hasText: 'team/' }).count()) !== 1)
+    throw new Error('a shared repo should be listed with its owner')
+  if ((await options.filter({ hasText: 'readonly' }).count()) !== 0)
+    throw new Error('a read-only repo should not be offered')
+  await repoField.fill('someone/readonly')
+  await page.getByRole('button', { name: 'Connect' }).click()
+  await page.getByText(/but not commit to it/).waitFor({ timeout: 5000 })
+  await repoField.fill('team/nope')
+  await page.getByRole('button', { name: 'Connect' }).click()
+  await page.getByText(/Can't find/).waitFor({ timeout: 5000 })
+  if ((await page.getByRole('button', { name: 'Create it' }).count()) !== 0)
+    throw new Error('should not offer to create a repo under another owner')
+  await repoField.fill('https://github.com/team/shared-clips')
+  await page.getByRole('button', { name: 'Connect' }).click()
+  await page.locator('.brand-repo', { hasText: 'team/shared-clips' }).waitFor({ timeout: 5000 })
+  const savedRepo = await page.evaluate(() => localStorage.getItem('qc.repo'))
+  if (savedRepo !== 'team/shared-clips')
+    throw new Error(`connecting a shared repo should remember it, got ${savedRepo}`)
+  pass('repos owned by someone else can be connected when writable')
 
   // A fresh context, because addInitScript would re-seed the token.
   const anon = await browser.newContext()

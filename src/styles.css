@@ -913,6 +913,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .repo-option:last-child { border-bottom: 0; }
 .repo-option:hover { background: var(--sunk); color: var(--ink); }
 .repo-option b { font-weight: 500; }
+.repo-option .repo-owner { color: var(--ink-3); }
 .repo-option small {
   margin-left: auto;
   font: var(--label);
