@@ -72,6 +72,8 @@ interface RequestOptions {
 export class GitHubClient {
   /** Commits run one at a time per repo, so our own saves never race each other. */
   private readonly queues = new Map<string, Promise<unknown>>()
+  /** Repos known to have at least one commit, so the git data API works on them. */
+  private readonly initialised = new Set<string>()
   /** The last commit we moved each branch to, and the head it replaced. */
   private readonly lastWrite = new Map<string, { parent: string | null; sha: string }>()
 
@@ -154,7 +156,8 @@ export class GitHubClient {
   /**
    * One recursive call returns the whole storage layout, which is what
    * lets the app rebuild its listing without an index file to keep in
-   * sync. An empty repo 404s here; that is a valid state, not an error.
+   * sync. An empty repo answers 409 ("Git Repository is empty") or
+   * 404 here; that is a valid state, not an error.
    */
   async listTree(repo: RepoInfo, signal?: AbortSignal): Promise<TreeEntry[]> {
     try {
@@ -164,7 +167,7 @@ export class GitHubClient {
       )
       return data.tree ?? []
     } catch (error) {
-      if (error instanceof GitHubError && error.status === 404) return []
+      if (error instanceof GitHubError && (error.status === 404 || error.status === 409)) return []
       throw error
     }
   }
@@ -208,6 +211,8 @@ export class GitHubClient {
     if (writes.length === 0 && deletes.length === 0) {
       throw new Error('Nothing to commit')
     }
+
+    await this.ensureInitialised(repo)
 
     const base = `/repos/${repo.owner}/${repo.name}`
     const blobs = await Promise.all(
@@ -266,6 +271,33 @@ export class GitHubClient {
     throw new Error('Could not update the branch after several attempts')
   }
 
+  /**
+   * The git data API refuses a repo with no commits at all — even
+   * creating a blob answers 409 "Git Repository is empty". A repo made
+   * on github.com without "Add a README" is exactly that. The contents
+   * API is the one write that works there, so it lays down a README as
+   * the root commit; everything after is an ordinary fast-forward.
+   */
+  private async ensureInitialised(repo: RepoInfo): Promise<void> {
+    const key = repoKey(repo)
+    if (this.initialised.has(key)) return
+    if ((await this.headSha(repo)) === null) {
+      try {
+        await this.request(`/repos/${repo.owner}/${repo.name}/contents/README.md`, {
+          method: 'PUT',
+          body: {
+            message: 'Initialise Quick Copy storage',
+            content: btoa(README),
+          },
+        })
+      } catch (error) {
+        // 422: another device initialised it between our read and write.
+        if (!(error instanceof GitHubError && error.status === 422)) throw error
+      }
+    }
+    this.initialised.add(key)
+  }
+
   private async headSha(repo: RepoInfo): Promise<string | null> {
     try {
       const ref = await this.json<{ object: { sha: string } }>(
@@ -312,6 +344,13 @@ export class GitHubClient {
 }
 
 const COMMIT_ATTEMPTS = 5
+
+const README = `# Quick Copy data
+
+Saved by [Quick Copy](https://quick-copy.lfkdsk.org): one JSON
+descriptor per item under \`items/\`, attachments beside it under
+\`assets/<id>/\`.
+`
 
 function repoKey(repo: RepoInfo): string {
   return `${repo.owner}/${repo.name}@${repo.defaultBranch}`.toLowerCase()
