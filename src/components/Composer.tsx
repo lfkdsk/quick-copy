@@ -1,38 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
-import { fileBadge, formatBytes, parseTags } from '../lib/util'
+import { formatBytes, parseTags } from '../lib/util'
+import { fileKey, LocalThumb } from './Attachments'
 import { CloseIcon, FileIcon, PlusIcon } from './Icons'
 
 export interface ComposerPayload {
   title: string
   text: string
   tags: string[]
-  file: File | null
+  files: File[]
 }
 
 interface ComposerProps {
-  attachment: File | null
+  attachments: File[]
   busy: boolean
-  onAttach: (file: File | null) => void
+  onAttach: (files: File[]) => void
+  onRemove: (index: number) => void
+  onClear: () => void
   onSave: (payload: ComposerPayload) => Promise<boolean>
 }
 
-export function Composer({ attachment, busy, onAttach, onSave }: ComposerProps) {
+export function Composer({
+  attachments,
+  busy,
+  onAttach,
+  onRemove,
+  onClear,
+  onSave,
+}: ComposerProps) {
   const [text, setText] = useState('')
   const [title, setTitle] = useState('')
   const [tags, setTags] = useState('')
-  const [preview, setPreview] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!attachment || !attachment.type.startsWith('image/')) {
-      setPreview(null)
-      return
-    }
-    const url = URL.createObjectURL(attachment)
-    setPreview(url)
-    return () => URL.revokeObjectURL(url)
-  }, [attachment])
 
   // Grow with the content instead of scrolling inside a fixed box.
   useEffect(() => {
@@ -57,7 +56,7 @@ export function Composer({ attachment, busy, onAttach, onSave }: ComposerProps) 
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const canSave = !busy && (attachment !== null || text.trim().length > 0)
+  const canSave = !busy && (attachments.length > 0 || text.trim().length > 0)
 
   async function submit() {
     if (!canSave) return
@@ -65,53 +64,58 @@ export function Composer({ attachment, busy, onAttach, onSave }: ComposerProps) 
       title: title.trim(),
       text,
       tags: parseTags(tags),
-      file: attachment,
+      files: attachments,
     })
     if (!saved) return
     setText('')
     setTitle('')
     setTags('')
-    onAttach(null)
+    onClear()
     textareaRef.current?.focus()
   }
 
   function handlePaste(event: React.ClipboardEvent) {
-    const file = event.clipboardData.files[0]
-    if (!file) return
+    const files = Array.from(event.clipboardData.files)
+    if (files.length === 0) return
     event.preventDefault()
-    onAttach(file)
+    onAttach(files)
   }
 
   function handlePick(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!file) return
-    onAttach(file)
+    if (files.length === 0) return
+    onAttach(files)
   }
+
+  const only = attachments.length === 1 ? attachments[0] : undefined
+  const totalBytes = attachments.reduce((sum, file) => sum + file.size, 0)
 
   return (
     <section className="composer glass" aria-label="New item">
-      {attachment && (
+      {attachments.length > 0 && (
         <div className="attachment">
-          {preview ? (
-            <img src={preview} alt="" />
-          ) : (
-            <span className="file-thumb">
-              <FileIcon size={20} />
-              <em>{fileBadge(attachment.name)}</em>
-            </span>
-          )}
+          <ul className="thumbs">
+            {attachments.map((file, index) => (
+              <LocalThumb
+                key={fileKey(file)}
+                file={file}
+                onRemove={() => onRemove(index)}
+              />
+            ))}
+          </ul>
           <div>
-            <strong>{attachment.name || 'Pasted file'}</strong>
+            <strong>{only ? only.name || 'Pasted file' : `${attachments.length} attachments`}</strong>
             <small>
-              {attachment.type || 'file'} · {formatBytes(attachment.size)}
+              {only ? `${only.type || 'file'} · ` : ''}
+              {formatBytes(totalBytes)}
             </small>
           </div>
           <button
             type="button"
             className="btn btn-ghost btn-icon"
-            onClick={() => onAttach(null)}
-            aria-label="Remove attachment"
+            onClick={onClear}
+            aria-label={only ? 'Remove attachment' : 'Remove all attachments'}
           >
             <CloseIcon size={16} />
           </button>
@@ -130,9 +134,11 @@ export function Composer({ attachment, busy, onAttach, onSave }: ComposerProps) 
           }
         }}
         placeholder={
-          attachment
-            ? 'Add a caption… (optional)'
-            : 'Type a note, paste an image, or drop a file anywhere…'
+          attachments.length > 1
+            ? 'Write about them… (optional)'
+            : attachments.length
+              ? 'Add a caption… (optional)'
+              : 'Type a note, paste images, or drop files anywhere…'
         }
         aria-label="Note text"
       />
@@ -152,7 +158,13 @@ export function Composer({ attachment, busy, onAttach, onSave }: ComposerProps) 
           placeholder="tags, comma separated"
           aria-label="Tags"
         />
-        <input ref={fileInputRef} type="file" className="sr-only" onChange={handlePick} />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="sr-only"
+          onChange={handlePick}
+        />
         <button
           type="button"
           className="btn"
@@ -171,3 +183,4 @@ export function Composer({ attachment, busy, onAttach, onSave }: ComposerProps) 
     </section>
   )
 }
+

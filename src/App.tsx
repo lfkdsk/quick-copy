@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MAX_FILE_BYTES, MAX_IMAGE_BYTES } from './lib/config'
+import { MAX_FILE_BYTES } from './lib/config'
 import { GitHubClient, GitHubError, type GitHubUser, type RepoInfo } from './lib/github'
 import { consumeRedirect, signOut, storedToken } from './lib/oauth'
 import {
+  admitFiles,
   deleteItem,
+  isInlineImage,
   loadItems,
-  saveFile,
-  saveImage,
-  saveText,
+  saveItem,
   updateItem,
+  type ItemPatch,
   type LoadedItem,
 } from './lib/store'
 import { dayKey, dayLabel, errorMessage, formatBytes, pad2 } from './lib/util'
@@ -33,8 +34,6 @@ const FILTER_LABELS: Record<KindFilter, string> = {
   file: 'Files',
 }
 
-const TOO_BIG = `Files must be under ${formatBytes(MAX_FILE_BYTES)} — GitHub's per-file limit.`
-
 const REPO_KEY = 'qc.repo'
 const THEME_KEY = 'qc.theme'
 
@@ -57,14 +56,14 @@ export default function App() {
   const [skipped, setSkipped] = useState(0)
 
   const [saving, setSaving] = useState(false)
-  const [attachment, setAttachment] = useState<File | null>(null)
+  const [attachments, setAttachments] = useState<File[]>([])
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<KindFilter>('all')
   const [tag, setTag] = useState<string | null>(null)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editing, setEditing] = useState<LoadedItem | null>(null)
-  const [viewing, setViewing] = useState<LoadedItem | null>(null)
+  const [viewing, setViewing] = useState<{ item: LoadedItem; index: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const [theme, setTheme] = useState<Theme>(initialTheme)
 
@@ -188,15 +187,17 @@ export default function App() {
 
   // ------------------------------------------------- paste & drop anywhere
 
-  /** Refuse oversized files up front rather than after a long read. */
+  // The latest list, for a window listener that should not re-bind on every change.
+  const attachmentsRef = useRef(attachments)
+  attachmentsRef.current = attachments
+
+  /** Refuse oversized files up front rather than after a long read. Returns how many were kept. */
   const attach = useCallback(
-    (file: File | null) => {
-      if (file && file.size > MAX_FILE_BYTES) {
-        notify(TOO_BIG, 'error')
-        return false
-      }
-      setAttachment(file)
-      return true
+    (files: File[]) => {
+      const { accepted, refused } = admitFiles(attachmentsRef.current, files)
+      if (refused) notify(refused, 'error')
+      if (accepted.length) setAttachments((current) => [...current, ...accepted])
+      return accepted.length
     },
     [notify],
   )
@@ -216,12 +217,16 @@ export default function App() {
     const onPaste = (event: ClipboardEvent) => {
       // The composer has its own handler; this covers the rest of the page.
       if (isTyping(event.target) || !event.clipboardData) return
-      const file = event.clipboardData.files[0]
-      if (!file) return
+      const files = Array.from(event.clipboardData.files)
+      if (files.length === 0) return
       event.preventDefault()
-      if (!attach(file)) return
+      const kept = attach(files)
+      if (!kept) return
+      const noun = files.every((file) => file.type.startsWith('image/')) ? 'Image' : 'File'
       notify(
-        `${file.type.startsWith('image/') ? 'Image' : 'File'} attached — add a caption or hit Save`,
+        kept === 1
+          ? `${noun} attached — add a caption or hit Save`
+          : `${kept} ${noun.toLowerCase()}s attached — add some words or hit Save`,
         'info',
       )
     }
@@ -246,10 +251,8 @@ export default function App() {
       event.preventDefault()
       dragDepth.current = 0
       setDragging(false)
-      const files = event.dataTransfer?.files
-      if (!files?.length) return
-      if (files.length > 1) notify('One file at a time — attached the first one.', 'info')
-      attach(files[0]!)
+      const files = Array.from(event.dataTransfer?.files ?? [])
+      if (files.length) attach(files)
     }
 
     window.addEventListener('paste', onPaste)
@@ -273,25 +276,9 @@ export default function App() {
       setSettingsOpen(true)
       return false
     }
-    if (payload.file && payload.file.size > MAX_FILE_BYTES) {
-      notify(TOO_BIG, 'error')
-      return false
-    }
-    // Oversized images still save, just as a download rather than a thumbnail.
-    const asImage = payload.file?.type.startsWith('image/') && payload.file.size <= MAX_IMAGE_BYTES
-
     setSaving(true)
     try {
-      const draft = { title: payload.title, text: payload.text, tags: payload.tags }
-      const saved = payload.file
-        ? asImage
-          ? await saveImage(client, repo, { ...draft, file: payload.file })
-          : await saveFile(client, repo, { ...draft, file: payload.file })
-        : await saveText(client, repo, {
-            title: payload.title,
-            text: payload.text,
-            tags: payload.tags,
-          })
+      const saved = await saveItem(client, repo, payload)
       setItems((current) => [saved, ...current])
       notify(`Saved to ${repo.owner}/${repo.name}`, 'success')
       return true
@@ -303,13 +290,14 @@ export default function App() {
     }
   }
 
-  async function handleUpdate(patch: { title: string; text: string; tags: string[] }) {
+  async function handleUpdate(patch: ItemPatch) {
     if (!client || !repo || !editing) return
     setSaving(true)
     try {
       const next = await updateItem(client, repo, editing, patch)
       setItems((current) => current.map((item) => (item.id === next.id ? next : item)))
       setEditing(null)
+      setViewing(null)
       notify('Updated', 'success')
     } catch (error) {
       reportError(error)
@@ -320,7 +308,10 @@ export default function App() {
 
   async function handleDelete(item: LoadedItem) {
     if (!client || !repo) return
-    const label = item.title || item.asset?.name || 'this item'
+    const label =
+      item.title ||
+      (item.assets.length === 1 ? item.assets[0]!.name : '') ||
+      (item.assets.length ? `this item and its ${item.assets.length} attachments` : 'this item')
     if (!window.confirm(`Delete ${label}? This commits a removal to ${repo.name}.`)) return
     const snapshot = items
     setItems((current) => current.filter((entry) => entry.id !== item.id))
@@ -345,10 +336,10 @@ export default function App() {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return items.filter((item) => {
-      if (kind !== 'all' && item.kind !== kind) return false
+      if (kind !== 'all' && !matchesKind(item, kind)) return false
       if (tag && !item.tags.includes(tag)) return false
       if (!needle) return true
-      const haystack = [item.title, item.text, item.asset?.name, ...item.tags]
+      const haystack = [item.title, item.text, ...item.assets.map((asset) => asset.name), ...item.tags]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
@@ -372,9 +363,9 @@ export default function App() {
   const counts = useMemo(
     () => ({
       all: items.length,
-      text: items.filter((item) => item.kind === 'text').length,
-      image: items.filter((item) => item.kind === 'image').length,
-      file: items.filter((item) => item.kind === 'file').length,
+      text: items.filter((item) => matchesKind(item, 'text')).length,
+      image: items.filter((item) => matchesKind(item, 'image')).length,
+      file: items.filter((item) => matchesKind(item, 'file')).length,
     }),
     [items],
   )
@@ -415,7 +406,14 @@ export default function App() {
         onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
       />
       <div className="shell">
-        <Composer attachment={attachment} busy={saving} onAttach={attach} onSave={handleSave} />
+        <Composer
+          attachments={attachments}
+          busy={saving}
+          onAttach={attach}
+          onRemove={(index) => setAttachments((current) => current.filter((_, i) => i !== index))}
+          onClear={() => setAttachments([])}
+          onSave={handleSave}
+        />
 
         {loadError && (
           <div className="banner">
@@ -491,7 +489,7 @@ export default function App() {
                     client={client}
                     repo={repo!}
                     notify={notify}
-                    onOpen={setViewing}
+                    onOpen={(target, index) => setViewing({ item: target, index })}
                     onEdit={setEditing}
                     onDelete={(target) => void handleDelete(target)}
                     onTag={setTag}
@@ -507,7 +505,7 @@ export default function App() {
         <div className="dropzone">
           <div>
             <strong>Drop to attach</strong>
-            <small>images · any file up to {formatBytes(MAX_FILE_BYTES)}</small>
+            <small>images · any files up to {formatBytes(MAX_FILE_BYTES)} each</small>
           </div>
         </div>
       )}
@@ -528,7 +526,10 @@ export default function App() {
       {editing && (
         <EditDialog
           item={editing}
+          client={client}
+          repo={repo!}
           busy={saving}
+          notify={notify}
           onCancel={() => setEditing(null)}
           onSave={(patch) => void handleUpdate(patch)}
         />
@@ -536,7 +537,8 @@ export default function App() {
 
       {viewing && repo && (
         <Lightbox
-          item={viewing}
+          item={viewing.item}
+          start={viewing.index}
           client={client}
           repo={repo}
           notify={notify}
@@ -547,6 +549,16 @@ export default function App() {
       <Toasts toasts={toasts} dismiss={dismiss} />
     </>
   )
+}
+
+/**
+ * An entry with photos and a PDF shows under both Images and Files, so
+ * the chips find everything that holds one, not only items of that kind.
+ */
+function matchesKind(item: LoadedItem, kind: Exclude<KindFilter, 'all'>): boolean {
+  if (kind === 'text') return item.assets.length === 0
+  if (kind === 'image') return item.assets.some(isInlineImage)
+  return item.assets.some((asset) => !isInlineImage(asset))
 }
 
 function EmptyState({ hasItems, hasRepo }: { hasItems: boolean; hasRepo: boolean }) {
@@ -570,9 +582,9 @@ function EmptyState({ hasItems, hasRepo }: { hasItems: boolean; hasRepo: boolean
     <div className="empty">
       <h2>An empty shelf.</h2>
       <p>
-        Write a note above, press <kbd>⌘V</kbd> with a screenshot on the clipboard, or drop an image
-        or any file up to {formatBytes(MAX_FILE_BYTES)} anywhere on this page. Every save is a
-        commit.
+        Write a note above, press <kbd>⌘V</kbd> with a screenshot on the clipboard, or drop images
+        or any files up to {formatBytes(MAX_FILE_BYTES)} anywhere on this page — a few photos and
+        a paragraph make a diary entry. Every save is a commit.
       </p>
     </div>
   )

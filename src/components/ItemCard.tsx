@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { GitHubClient, RepoInfo } from '../lib/github'
-import { fetchAsset, itemUrl, type LoadedItem } from '../lib/store'
+import { fetchAsset, isInlineImage, itemUrl, type LoadedAsset, type LoadedItem } from '../lib/store'
 import { useAssetUrl, useInView } from '../lib/useAsset'
 import {
   copyImage,
@@ -30,7 +30,7 @@ interface ItemCardProps {
   client: GitHubClient
   repo: RepoInfo
   notify: Notify
-  onOpen: (item: LoadedItem) => void
+  onOpen: (item: LoadedItem, index: number) => void
   onEdit: (item: LoadedItem) => void
   onDelete: (item: LoadedItem) => void
   onTag: (tag: string) => void
@@ -50,7 +50,21 @@ export function ItemCard({
   const [busy, setBusy] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const { ref, inView } = useInView<HTMLDivElement>()
-  const asset = useAssetUrl(client, repo, item, item.kind === 'image' && inView)
+
+  const images = item.assets.filter(isInlineImage)
+  const files = item.assets.filter((asset) => !isInlineImage(asset))
+  const only = item.assets.length === 1 ? item.assets[0] : undefined
+  const totalBytes = item.assets.reduce((sum, asset) => sum + asset.size, 0)
+  // A lone picture copies as the picture; anything with more to it copies
+  // its words, and the lightbox copies any one picture on its own.
+  const copyTarget: 'text' | 'image' | null =
+    only && isInlineImage(only)
+      ? 'image'
+      : item.text
+        ? 'text'
+        : images.length
+          ? 'image'
+          : null
 
   function flashCopied() {
     setCopied(true)
@@ -60,13 +74,13 @@ export function ItemCard({
   async function handleCopy() {
     setBusy(true)
     try {
-      if (item.kind === 'text') {
+      if (copyTarget === 'text') {
         await copyText(item.text ?? '')
         flashCopied()
         notify('Copied to clipboard', 'success')
         return
       }
-      const blob = await fetchAsset(client, repo, item)
+      const blob = await fetchAsset(client, repo, images[0]!)
       const result = await copyImage(blob)
       flashCopied()
       notify(
@@ -96,12 +110,11 @@ export function ItemCard({
     }
   }
 
-  async function handleDownload() {
-    if (!item.asset) return
+  async function handleDownload(asset: LoadedAsset) {
     setBusy(true)
     try {
-      const blob = await fetchAsset(client, repo, item)
-      download(blob, item.asset.name)
+      const blob = await fetchAsset(client, repo, asset)
+      download(blob, asset.name)
     } catch (error) {
       notify(`Download failed: ${errorMessage(error)}`, 'error')
     } finally {
@@ -111,53 +124,69 @@ export function ItemCard({
 
   return (
     <article className="card glass" ref={ref}>
-      {item.kind === 'image' && (
+      {images.length === 1 && (
         <button
           type="button"
           className="card-media"
-          onClick={() => onOpen(item)}
-          aria-label={`Open ${item.title || item.asset?.name || 'image'}`}
+          onClick={() => onOpen(item, 0)}
+          aria-label={`Open ${item.title || images[0]!.name}`}
           // Reserving the real aspect ratio keeps the masonry columns from
           // reflowing as each thumbnail arrives.
           style={
-            item.asset?.width && item.asset?.height
-              ? { aspectRatio: `${item.asset.width} / ${item.asset.height}` }
+            images[0]!.width && images[0]!.height
+              ? { aspectRatio: `${images[0]!.width} / ${images[0]!.height}` }
               : undefined
           }
         >
-          {asset.url ? (
-            <img
-              src={asset.url}
-              alt={item.title || item.asset?.name || 'Saved image'}
-              loading="lazy"
-              decoding="async"
-            />
-          ) : (
-            <div className={`placeholder ${asset.error ? '' : 'shimmer'}`}>
-              <ImageIcon size={22} />
-            </div>
-          )}
+          <CardImage
+            client={client}
+            repo={repo}
+            asset={images[0]!}
+            enabled={inView}
+            alt={item.title || images[0]!.name}
+          />
         </button>
       )}
 
-      {item.kind === 'file' && item.asset && (
+      {images.length > 1 && (
+        <div className={`card-gallery count-${Math.min(images.length, GALLERY_CELLS)}`}>
+          {images.slice(0, GALLERY_CELLS).map((asset, index) => {
+            const hidden = index === GALLERY_CELLS - 1 ? images.length - GALLERY_CELLS : 0
+            return (
+              <button
+                key={asset.path}
+                type="button"
+                className="card-media"
+                onClick={() => onOpen(item, index)}
+                aria-label={`Open ${asset.name}`}
+              >
+                <CardImage client={client} repo={repo} asset={asset} enabled={inView} alt={asset.name} />
+                {hidden > 0 && <span className="gallery-more">+{hidden}</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {files.map((asset) => (
         <button
+          key={asset.path}
           type="button"
           className="card-file"
-          onClick={handleDownload}
+          onClick={() => void handleDownload(asset)}
           disabled={busy}
-          aria-label={`Download ${item.asset.name}`}
+          aria-label={`Download ${asset.name}`}
         >
           <span className="file-thumb">
-            {busy ? <span className="spinner" /> : <FileIcon size={20} />}
-            <em>{fileBadge(item.asset.name)}</em>
+            {busy && only ? <span className="spinner" /> : <FileIcon size={20} />}
+            <em>{fileBadge(asset.name)}</em>
           </span>
           <span className="card-file-name">
-            <strong>{item.asset.name}</strong>
-            <small>{item.asset.mime}</small>
+            <strong>{asset.name}</strong>
+            <small>{only ? asset.mime : `${asset.mime} · ${formatBytes(asset.size)}`}</small>
           </span>
         </button>
-      )}
+      ))}
 
       {(item.title || item.text || item.tags.length > 0) && (
         <div className="card-body">
@@ -186,16 +215,16 @@ export function ItemCard({
       <footer className="card-foot">
         <span className="grow" title={formatDate(item.createdAt)}>
           {timeOfDay(item.createdAt)}
-          {item.asset ? ` · ${formatBytes(item.asset.size)}` : ''}
+          {item.assets.length ? ` · ${formatBytes(totalBytes)}` : ''}
         </span>
         <div className="card-actions">
-          {item.kind !== 'file' && (
+          {copyTarget && (
             <button
               type="button"
               className={`card-action ${copied ? 'done' : ''}`}
               onClick={handleCopy}
               disabled={busy}
-              title="Copy"
+              title={copyTarget === 'image' ? 'Copy image' : 'Copy text'}
               aria-label="Copy"
             >
               {copied ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
@@ -210,50 +239,38 @@ export function ItemCard({
           >
             <LinkIcon size={15} />
           </button>
-          {item.kind === 'file' ? (
+          {images.length > 0 && (
             <button
               type="button"
               className="card-action"
-              onClick={handleDownload}
+              onClick={() => onOpen(item, 0)}
+              title="Open"
+              aria-label="Open"
+            >
+              <ExpandIcon size={15} />
+            </button>
+          )}
+          {only && (
+            <button
+              type="button"
+              className="card-action"
+              onClick={() => void handleDownload(only)}
               disabled={busy}
               title="Download"
               aria-label="Download"
             >
               <DownloadIcon size={15} />
             </button>
-          ) : item.kind === 'image' ? (
-            <>
-              <button
-                type="button"
-                className="card-action"
-                onClick={() => onOpen(item)}
-                title="Open"
-                aria-label="Open"
-              >
-                <ExpandIcon size={15} />
-              </button>
-              <button
-                type="button"
-                className="card-action"
-                onClick={handleDownload}
-                disabled={busy}
-                title="Download"
-                aria-label="Download"
-              >
-                <DownloadIcon size={15} />
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="card-action"
-              onClick={() => onEdit(item)}
-              title="Edit"
-              aria-label="Edit"
-            >
-              <EditIcon size={15} />
-            </button>
           )}
+          <button
+            type="button"
+            className="card-action"
+            onClick={() => onEdit(item)}
+            title="Edit"
+            aria-label="Edit"
+          >
+            <EditIcon size={15} />
+          </button>
           <button
             type="button"
             className="card-action danger"
@@ -266,5 +283,27 @@ export function ItemCard({
         </div>
       </footer>
     </article>
+  )
+}
+
+/** Past this many, the last cell says how many more the lightbox holds. */
+const GALLERY_CELLS = 4
+
+interface CardImageProps {
+  client: GitHubClient
+  repo: RepoInfo
+  asset: LoadedAsset
+  enabled: boolean
+  alt: string
+}
+
+function CardImage({ client, repo, asset, enabled, alt }: CardImageProps) {
+  const image = useAssetUrl(client, repo, asset, enabled)
+  return image.url ? (
+    <img src={image.url} alt={alt} loading="lazy" decoding="async" />
+  ) : (
+    <div className={`placeholder ${image.error ? '' : 'shimmer'}`}>
+      <ImageIcon size={22} />
+    </div>
   )
 }

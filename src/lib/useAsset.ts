@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { cacheGet } from './blobCache'
 import type { GitHubClient, RepoInfo } from './github'
-import { fetchAsset, rawAssetUrl, type LoadedItem } from './store'
+import { fetchAsset, rawAssetUrl, type LoadedAsset } from './store'
 import { errorMessage } from './util'
 
 interface AssetState {
@@ -11,22 +11,24 @@ interface AssetState {
 }
 
 /**
- * Resolves an item's image to something an <img> can render, cheapest
+ * Resolves an attached image to something an <img> can render, cheapest
  * route first: bytes already in the cache, then the public raw CDN,
  * then an authenticated blob fetch for private repos.
  */
 export function useAssetUrl(
   client: GitHubClient,
   repo: RepoInfo,
-  item: LoadedItem,
+  asset: LoadedAsset | undefined,
   enabled = true,
 ): AssetState {
   const [state, setState] = useState<AssetState>({ loading: true })
-  const assetPath = item.asset?.path
-  const assetSha = item.assetSha
+  const assetPath = asset?.path
+  const assetSha = asset?.sha
 
   useEffect(() => {
     if (!enabled || !assetPath) return
+    // Switching to another picture must not keep showing the last one.
+    setState({ loading: true })
     let cancelled = false
     let objectUrl: string | null = null
     const controller = new AbortController()
@@ -52,7 +54,7 @@ export function useAssetUrl(
           return
         }
 
-        const blob = await fetchAsset(client, repo, item, controller.signal)
+        const blob = await fetchAsset(client, repo, asset!, controller.signal)
         if (cancelled) return
         objectUrl = URL.createObjectURL(blob)
         setState({ url: objectUrl, loading: false })
@@ -67,7 +69,7 @@ export function useAssetUrl(
       controller.abort()
       revoke()
     }
-    // `item` is intentionally not a dependency: its identity changes on
+    // `asset` is intentionally not a dependency: its identity changes on
     // every list refresh, but only these two fields affect the bytes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, repo, assetPath, assetSha, enabled])

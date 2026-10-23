@@ -1,7 +1,7 @@
 # Quick Copy
 
-A clipboard that lives in git. Paste text, drop an image or any file
-(up to 100 MB) and it is
+A clipboard that lives in git. Paste text, drop images or any files
+(up to 100 MB each) and it is
 committed straight to a GitHub repository you own — no server, no
 database, no vendor. Refresh, switch machines, or open the repo on
 github.com; it is all just files, with a history.
@@ -75,9 +75,47 @@ Any other file is stored the same way with `"kind": "file"` and no
 dimensions; the card shows its name and extension and downloads it on
 click.
 
+### Several attachments: diary entries
+
+An item can hold up to 20 attachments — a day's photos with a few
+paragraphs under them makes a diary entry, and the day headings in the
+grid already read like one. Paste, drop or pick several files at once,
+or keep adding before you save. The descriptor lists them under
+`assets` instead of `asset`, in order:
+
+```json
+{
+  "v": 1,
+  "id": "20261023-191200-k3m9qa",
+  "kind": "image",
+  "title": "Lake day",
+  "text": "Walked to the lake, then lunch.\nCold but bright.",
+  "tags": ["diary"],
+  "createdAt": "2026-10-23T19:12:00.000Z",
+  "assets": [
+    { "path": "assets/20261023-191200-k3m9qa/image.png", "name": "image.png", "mime": "image/png", "size": 2048311, "width": 4032, "height": 3024 },
+    { "path": "assets/20261023-191200-k3m9qa/image-2.png", "name": "image-2.png", "mime": "image/png", "size": 1874002, "width": 4032, "height": 3024 }
+  ]
+}
+```
+
+An item with exactly one attachment is still written with `asset`, so
+everything saved before stays as it is. Names that collide (every
+pasted screenshot is `image.png`) get `-2`, `-3`. `kind` is derived:
+`image` when any attachment is a picture, `file` when all are other
+files, `text` when there are none — and the Images and Files filters
+match an entry that holds either.
+
+The card shows the pictures as a grid (the fourth tile says how many
+more there are) and other files as download rows. The lightbox steps
+through every picture with `←`/`→` and shows the text under it. **Edit**
+works on every item now: change the words, drop attachments or add new
+ones — one commit that writes the new files and deletes the removed ones.
+
 Every card has a **Copy link** button. There is no Quick Copy API —
 the link points straight at the file in the data repo: the asset for
-images and files, the JSON descriptor for notes.
+an item with one attachment, the JSON descriptor for notes and for
+items with several (the lightbox copies a link to the picture it shows).
 
 | data repo | link | who can open it |
 | --- | --- | --- |
@@ -107,7 +145,8 @@ npm run dev
 | `npm run smoke` | End-to-end checks against a mocked GitHub API |
 
 The smoke test drives a real browser through sign-in state, listing,
-saving a note, an image and a file, the 100 MB cap, filtering and search. Playwright is not
+saving a note, an image and a file, an entry with several pictures,
+stepping through them, editing one out, the 100 MB cap, filtering and search. Playwright is not
 a dependency — install it when you want to run the test:
 
 ```sh
@@ -217,14 +256,16 @@ the token back to the old address.
 | `⌘`/`Ctrl` + `↵` | save |
 | `⌘`/`Ctrl` + `V` | paste an image or file anywhere on the page |
 | `/` | search |
+| `←` / `→` | previous / next picture in the viewer |
 | `Esc` | close the viewer or leave the search box |
 
-Dropping an image or any file anywhere on the window attaches it too.
+Dropping images or any files anywhere on the window attaches them too.
 
 ## Limits
 
 Files are capped at 100 MB — GitHub rejects any single file larger than
-that. Images over 20 MB are still accepted but saved as a plain file
+that. One item takes up to 20 attachments and 200 MB in all, because
+every one is encoded in memory before the commit is made. Images over 20 MB are still accepted but saved as a plain file
 rather than a thumbnail, so the grid and the image cache stay light;
 plain files are never put in the IndexedDB cache. Uploads go through
 the blobs API as base64 in a JSON body, so a file near the cap takes a

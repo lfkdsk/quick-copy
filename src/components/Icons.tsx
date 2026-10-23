@@ -176,3 +176,15 @@ export const LinkIcon = (p: IconProps) => (
     <path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" />
   </Icon>
 )
+
+export const ChevronLeftIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M15 5l-7 7 7 7" />
+  </Icon>
+)
+
+export const ChevronRightIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 5l7 7-7 7" />
+  </Icon>
+)

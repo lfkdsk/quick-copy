@@ -63,6 +63,7 @@ const errors = []
 const calls = []
 const commitPayloads = []
 const blobPayloads = []
+const treePayloads = []
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
@@ -107,7 +108,10 @@ await context.route('https://api.github.com/**', async (route) => {
   }
   if (path.endsWith('/git/ref/heads/main')) return json({ object: { sha: 'headsha' } })
   if (path.includes('/git/commits/')) return json({ tree: { sha: 'basetree' } })
-  if (method === 'POST' && path.endsWith('/git/trees')) return json({ sha: 'newtree' })
+  if (method === 'POST' && path.endsWith('/git/trees')) {
+    treePayloads.push(request.postDataJSON())
+    return json({ sha: 'newtree' })
+  }
   if (method === 'POST' && path.endsWith('/git/commits')) {
     commitPayloads.push(request.postDataJSON())
     return json({ sha: 'newcommit' })
@@ -209,6 +213,54 @@ try {
   if (imageCards !== 1) throw new Error(`image filter: expected 1 card, saw ${imageCards}`)
   await page.getByRole('button', { name: /Everything/ }).click()
   pass('filter chips narrow the grid')
+
+  // A diary-style entry: two pictures and a paragraph in one commit.
+  // Clipboard screenshots all come in as image.png, so names must not collide.
+  await page.setInputFiles('input[type=file]', [
+    { name: 'image.png', mimeType: 'image/png', buffer: png },
+    { name: 'image.png', mimeType: 'image/png', buffer: png },
+  ])
+  await page.locator('.attachment').getByText('2 attachments').waitFor({ timeout: 5000 })
+  await page.getByPlaceholder(/Write about them/).fill('Walked to the lake.\nCold, bright.')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  const entry = page.locator('article.card', { hasText: 'Walked to the lake.' })
+  await entry.waitFor({ timeout: 10_000 })
+  if ((await entry.locator('.card-gallery .card-media').count()) !== 2)
+    throw new Error('entry: expected a two-picture gallery on the card')
+  const entryCommit = commitPayloads.at(-1)
+  if (!entryCommit?.message?.startsWith('Add entry:'))
+    throw new Error(`entry: unexpected commit message ${entryCommit?.message}`)
+  const entryPaths = treePayloads.at(-1).tree.map((e) => e.path)
+  const pictures = entryPaths.filter((path) => path.startsWith('assets/'))
+  if (pictures.length !== 2 || !pictures.some((path) => path.endsWith('/image-2.png')))
+    throw new Error(`entry: expected two distinct asset paths, got ${pictures.join(', ')}`)
+  if (!entryPaths.some((path) => path.startsWith('items/')))
+    throw new Error('entry: the descriptor should land in the same commit')
+  pass('several pictures and some text save as one entry in one commit')
+
+  await entry.locator('.card-gallery .card-media').first().click()
+  await page.locator('.lightbox').getByText(/^1 \/ 2/).waitFor({ timeout: 5000 })
+  await page.keyboard.press('ArrowRight')
+  await page.locator('.lightbox').getByText(/^2 \/ 2/).waitFor({ timeout: 5000 })
+  await page.keyboard.press('Escape')
+  await page.locator('.lightbox').waitFor({ state: 'detached', timeout: 5000 })
+  pass('the lightbox steps through an entry\'s pictures')
+
+  await entry.getByRole('button', { name: 'Edit' }).click()
+  await page.getByRole('button', { name: 'Remove image-2.png' }).click()
+  await page.getByRole('button', { name: 'Save changes' }).click()
+  await page.locator('.dialog').waitFor({ state: 'detached', timeout: 10_000 })
+  const removal = treePayloads.at(-1).tree.find((e) => e.path.endsWith('/image-2.png'))
+  if (!removal || removal.sha !== null)
+    throw new Error('edit: removing a picture should delete its file in the same commit')
+  if ((await entry.locator('.card-media').count()) !== 1)
+    throw new Error('edit: the card should be down to one picture')
+  pass('editing an entry can drop one of its pictures')
+
+  await page.getByRole('button', { name: /Images/ }).click()
+  const withPictures = await page.locator('article.card').count()
+  if (withPictures !== 2) throw new Error(`image filter: expected 2 cards, saw ${withPictures}`)
+  await page.getByRole('button', { name: /Everything/ }).click()
 
   await page.getByRole('searchbox').fill('checklist')
   const hits = await page.locator('article.card').count()
