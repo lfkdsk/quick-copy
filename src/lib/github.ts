@@ -62,15 +62,26 @@ interface RequestOptions {
   /** Ask for the raw bytes instead of the JSON envelope (blobs API). */
   raw?: boolean
   signal?: AbortSignal
+  /**
+   * GitHub sends `Cache-Control: private, max-age=60`, so without this
+   * the browser answers a re-read of a moving ref from its own cache.
+   */
+  cache?: RequestCache
 }
 
 export class GitHubClient {
+  /** Commits run one at a time per repo, so our own saves never race each other. */
+  private readonly queues = new Map<string, Promise<unknown>>()
+  /** The last commit we moved each branch to, and the head it replaced. */
+  private readonly lastWrite = new Map<string, { parent: string | null; sha: string }>()
+
   constructor(private readonly token: string) {}
 
   private async request(path: string, options: RequestOptions = {}): Promise<Response> {
     const response = await fetch(path.startsWith('http') ? path : API + path, {
       method: options.method ?? 'GET',
       signal: options.signal,
+      cache: options.cache,
       headers: {
         accept: options.raw ? 'application/vnd.github.raw' : 'application/vnd.github+json',
         authorization: `Bearer ${this.token}`,
@@ -149,7 +160,7 @@ export class GitHubClient {
     try {
       const data = await this.json<{ tree: TreeEntry[]; truncated: boolean }>(
         `/repos/${repo.owner}/${repo.name}/git/trees/${encodeURIComponent(repo.defaultBranch)}?recursive=1`,
-        { signal },
+        { signal, cache: 'no-cache' },
       )
       return data.tree ?? []
     } catch (error) {
@@ -182,7 +193,16 @@ export class GitHubClient {
    * without each other. Blobs are uploaded once; the tree/commit/ref
    * dance is retried if someone else moved the branch underneath us.
    */
-  async commit(repo: RepoInfo, spec: CommitSpec): Promise<string> {
+  commit(repo: RepoInfo, spec: CommitSpec): Promise<string> {
+    const key = repoKey(repo)
+    const run = (this.queues.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.commitNow(repo, spec))
+    this.queues.set(key, run)
+    return run
+  }
+
+  private async commitNow(repo: RepoInfo, spec: CommitSpec): Promise<string> {
     const writes = spec.writes ?? []
     const deletes = spec.deletes ?? []
     if (writes.length === 0 && deletes.length === 0) {
@@ -200,7 +220,8 @@ export class GitHubClient {
       }),
     )
 
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < COMMIT_ATTEMPTS; attempt++) {
+      if (attempt > 0) await sleep(300 * 2 ** (attempt - 1))
       const head = await this.headSha(repo)
       const baseTree = head ? await this.treeShaOf(repo, head) : undefined
 
@@ -230,14 +251,15 @@ export class GitHubClient {
 
       try {
         await this.moveRef(repo, commit.sha, head === null)
+        this.lastWrite.set(repoKey(repo), { parent: head, sha: commit.sha })
         return commit.sha
       } catch (error) {
-        // 422 here means the branch advanced between our read and our
-        // write. The blobs are still good, so rebuild the tree on the
-        // new head instead of failing the user's save.
+        // 422 ("not a fast forward") means the branch advanced between
+        // our read and our write. The blobs are still good, so rebuild
+        // the tree on the new head instead of failing the user's save.
         const raced =
           error instanceof GitHubError && (error.status === 422 || error.status === 409)
-        if (!raced || attempt === 2) throw error
+        if (!raced || attempt === COMMIT_ATTEMPTS - 1) throw error
       }
     }
 
@@ -248,12 +270,19 @@ export class GitHubClient {
     try {
       const ref = await this.json<{ object: { sha: string } }>(
         `/repos/${repo.owner}/${repo.name}/git/ref/heads/${encodeURIComponent(repo.defaultBranch)}`,
+        { cache: 'no-store' },
       )
+      // Right after a write GitHub can still serve the ref from a replica
+      // that has not caught up. If it hands back the head our last commit
+      // replaced, that commit is the real tip; building on the old one
+      // is a guaranteed "not a fast forward".
+      const last = this.lastWrite.get(repoKey(repo))
+      if (last && last.parent === ref.object.sha) return last.sha
       return ref.object.sha
     } catch (error) {
       // A repo with no commits has no ref yet; the first commit creates it.
       if (error instanceof GitHubError && (error.status === 404 || error.status === 409)) {
-        return null
+        return this.lastWrite.get(repoKey(repo))?.sha ?? null
       }
       throw error
     }
@@ -280,6 +309,16 @@ export class GitHubClient {
       body: { sha, force: false },
     })
   }
+}
+
+const COMMIT_ATTEMPTS = 5
+
+function repoKey(repo: RepoInfo): string {
+  return `${repo.owner}/${repo.name}@${repo.defaultBranch}`.toLowerCase()
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function toRepoInfo(raw: any): RepoInfo {
