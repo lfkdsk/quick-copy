@@ -28,6 +28,15 @@ repositories are only ever created under your own account. A private
 repository under another owner still needs the `repo` scope, and an
 organisation may also have to approve the OAuth app before it shows up.
 
+### One repo per tab
+
+The connected repo is part of the address —
+`https://quick-copy.lfkdsk.org/<owner>/<name>` — so you can open a
+clipboard repo in one tab and a diary repo in another, bookmark each,
+or send someone a link to the same view. The address always wins; the
+bare root opens whichever repo you last picked in the storage dialog.
+Picking a repo in one tab never changes another tab.
+
 ```
 quick-copy-data/
 ├── items/
@@ -178,6 +187,15 @@ without from `/<repo>/`. Get that wrong and every asset 404s while
 
 So moving off the custom domain is one deletion, not two edits that can
 drift apart.
+
+### Deep links
+
+Pages has no rewrite rules, so `/<owner>/<name>` is not a file it can
+find. The build copies `index.html` to `404.html`, which Pages serves
+for any missing path; the app then reads the repo from the address.
+The page arrives with a 404 status, which browsers ignore. Sign-in
+always comes back to the site root, so the tab stashes its path in
+`sessionStorage` before leaving and puts it back on return.
 
 ### Cloudflare in front of Pages
 

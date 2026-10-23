@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MAX_FILE_BYTES } from './lib/config'
 import { GitHubClient, GitHubError, type GitHubUser, type RepoInfo } from './lib/github'
 import { consumeRedirect, signOut, storedToken } from './lib/oauth'
+import { repoFromPath, showRepoInPath } from './lib/route'
 import {
   admitFiles,
   deleteItem,
@@ -122,12 +123,17 @@ export default function App() {
         setClient(api)
         setUser(me)
 
-        const saved = localStorage.getItem(REPO_KEY)
+        // The address wins, so every tab can keep its own repo; the
+        // last pick is only the default for the bare root.
+        const fromPath = repoFromPath()
+        const saved = fromPath ?? localStorage.getItem(REPO_KEY)
         if (saved) {
           const [owner, name] = saved.includes('/') ? saved.split('/') : [me.login, saved]
           const found = await api.getRepo(owner!, name!)
           if (cancelled) return
           if (found) setRepo(found)
+          else if (fromPath)
+            notify(`Can't open ${fromPath} — it does not exist or this account can't see it.`, 'error')
           else localStorage.removeItem(REPO_KEY)
         }
         setPhase('ready')
@@ -145,7 +151,12 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [resetToAnon])
+  }, [resetToAnon, notify])
+
+  // Keep the address in step with the repo, canonical casing included.
+  useEffect(() => {
+    if (phase === 'ready') showRepoInPath(repo)
+  }, [phase, repo])
 
   // ------------------------------------------------------- item loading
 
