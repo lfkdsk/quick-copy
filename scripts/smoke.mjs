@@ -137,6 +137,10 @@ try {
   await page.getByText('Deploy checklist').waitFor({ timeout: 10_000 })
   pass('listing renders items read back from the git tree')
 
+  if (new URL(page.url()).pathname !== `/${OWNER}/${REPO}`)
+    throw new Error(`the address should name the repo, got ${page.url()}`)
+  pass('the address bar names the connected repo')
+
   await page
     .locator('article.card', { hasText: 'Deploy checklist' })
     .getByRole('button', { name: 'Copy link' })
@@ -321,6 +325,19 @@ try {
   if (savedRepo !== 'team/shared-clips')
     throw new Error(`connecting a shared repo should remember it, got ${savedRepo}`)
   pass('repos owned by someone else can be connected when writable')
+  if (new URL(page.url()).pathname !== '/team/shared-clips')
+    throw new Error(`switching repos should update the address, got ${page.url()}`)
+
+  // Another tab opened on a repo's address uses that repo, whatever
+  // was picked last (the init script stores tester/quick-copy-data).
+  const second = await context.newPage()
+  second.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
+  await second.goto(`${BASE}team/shared-clips`, { waitUntil: 'networkidle' })
+  await second.locator('.brand-repo', { hasText: 'team/shared-clips' }).waitFor({ timeout: 10_000 })
+  await second.goto(`${BASE}team/nope`, { waitUntil: 'networkidle' })
+  await second.getByText(/Can't open team\/nope/).waitFor({ timeout: 10_000 })
+  await second.close()
+  pass('each tab opens the repo named in its address')
 
   // A fresh context, because addInitScript would re-seed the token.
   const anon = await browser.newContext()

@@ -3,6 +3,7 @@ import { OAUTH_CLIENT_ID, OAUTH_WORKER_URL } from './config'
 const STATE_KEY = 'qc.oauth.state'
 const TOKEN_KEY = 'qc.oauth.token'
 const SCOPE_KEY = 'qc.oauth.scope'
+const RETURN_KEY = 'qc.oauth.return'
 
 /**
  * `public_repo` is enough to write to a public repo and is the smaller
@@ -23,6 +24,9 @@ export function beginLogin(scope: OAuthScope): void {
   // sessionStorage, not localStorage: the state is only meaningful for
   // the tab that started the round-trip, and it should not outlive it.
   sessionStorage.setItem(STATE_KEY, state)
+  // The broker always lands on the site root; remember which repo's
+  // address this tab was on so sign-in does not lose it.
+  sessionStorage.setItem(RETURN_KEY, window.location.pathname)
 
   const url = new URL('https://github.com/login/oauth/authorize')
   url.searchParams.set('client_id', OAUTH_CLIENT_ID)
@@ -62,7 +66,9 @@ export function consumeRedirect(): OAuthResult | null {
 }
 
 function clearHash(): void {
-  const { pathname, search } = window.location
+  const { search } = window.location
+  const pathname = sessionStorage.getItem(RETURN_KEY) || window.location.pathname
+  sessionStorage.removeItem(RETURN_KEY)
   window.history.replaceState(null, '', pathname + search)
 }
 
