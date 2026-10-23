@@ -1,18 +1,51 @@
-import { useState } from 'react'
-import type { LoadedItem } from '../lib/store'
+import { useRef, useState } from 'react'
+import type { GitHubClient, RepoInfo } from '../lib/github'
+import { admitFiles, type ItemPatch, type LoadedItem } from '../lib/store'
 import { parseTags } from '../lib/util'
+import { fileKey, LocalThumb, StoredThumb } from './Attachments'
+import type { Notify } from './Toasts'
+import { FileIcon } from './Icons'
 
 interface EditDialogProps {
   item: LoadedItem
+  client: GitHubClient
+  repo: RepoInfo
   busy: boolean
+  notify: Notify
   onCancel: () => void
-  onSave: (patch: { title: string; text: string; tags: string[] }) => void
+  onSave: (patch: ItemPatch) => void
 }
 
-export function EditDialog({ item, busy, onCancel, onSave }: EditDialogProps) {
+export function EditDialog({ item, client, repo, busy, notify, onCancel, onSave }: EditDialogProps) {
   const [title, setTitle] = useState(item.title ?? '')
   const [text, setText] = useState(item.text ?? '')
   const [tags, setTags] = useState(item.tags.join(', '))
+  const [removed, setRemoved] = useState<Set<string>>(() => new Set())
+  const [added, setAdded] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const kept = item.assets.filter((asset) => !removed.has(asset.path))
+  const empty = kept.length + added.length === 0 && text.trim().length === 0
+
+  function add(files: File[]) {
+    const { accepted, refused } = admitFiles([...kept, ...added], files)
+    if (refused) notify(refused, 'error')
+    if (accepted.length) setAdded((current) => [...current, ...accepted])
+  }
+
+  function toggle(path: string) {
+    setRemoved((current) => {
+      const next = new Set(current)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  function save() {
+    if (busy || empty) return
+    onSave({ title, text, tags: parseTags(tags), remove: [...removed], add: added })
+  }
 
   return (
     <div className="backdrop" onClick={onCancel}>
@@ -43,13 +76,62 @@ export function EditDialog({ item, busy, onCancel, onSave }: EditDialogProps) {
           rows={9}
           style={{ resize: 'vertical', fontFamily: 'var(--mono)', fontSize: 12.5, lineHeight: 1.7 }}
           onChange={(event) => setText(event.target.value)}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files)
+            if (files.length === 0) return
+            event.preventDefault()
+            add(files)
+          }}
           onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-              onSave({ title, text, tags: parseTags(tags) })
-            }
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') save()
           }}
           autoFocus
         />
+
+        <label>Attachments</label>
+        <div className="edit-attachments">
+          {(item.assets.length > 0 || added.length > 0) && (
+            <ul className="thumbs">
+              {item.assets.map((asset) => (
+                <StoredThumb
+                  key={asset.path}
+                  client={client}
+                  repo={repo}
+                  asset={asset}
+                  removed={removed.has(asset.path)}
+                  onToggle={() => toggle(asset.path)}
+                />
+              ))}
+              {added.map((file) => (
+                <LocalThumb
+                  key={fileKey(file)}
+                  file={file}
+                  onRemove={() => setAdded((current) => current.filter((f) => f !== file))}
+                />
+              ))}
+            </ul>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="sr-only"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? [])
+              event.target.value = ''
+              add(files)
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+          >
+            <FileIcon size={16} />
+            Add files
+          </button>
+        </div>
 
         <label htmlFor="edit-tags">Tags</label>
         <input
@@ -64,12 +146,7 @@ export function EditDialog({ item, busy, onCancel, onSave }: EditDialogProps) {
           <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => onSave({ title, text, tags: parseTags(tags) })}
-            disabled={busy || (item.kind === 'text' && text.trim().length === 0)}
-          >
+          <button type="button" className="btn btn-primary" onClick={save} disabled={busy || empty}>
             {busy ? <span className="spinner" /> : null}
             Save changes
           </button>

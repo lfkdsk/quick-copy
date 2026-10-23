@@ -36,3 +36,9 @@ export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 // GitHub refuses any single file over 100 MiB, so that is the ceiling
 // for everything else. Enforced client-side with a friendly message.
 export const MAX_FILE_BYTES = 100 * 1024 * 1024
+
+// An item can carry several attachments — a day's photos under one
+// entry. Every one is uploaded as base64 before the commit is made, so
+// the whole set has to fit in memory at once.
+export const MAX_ATTACHMENTS = 20
+export const MAX_ITEM_BYTES = 200 * 1024 * 1024
