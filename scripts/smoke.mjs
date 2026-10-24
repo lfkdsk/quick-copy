@@ -48,6 +48,19 @@ const READONLY_JSON = {
   permissions: { push: false },
 }
 
+// Made on github.com without "Add a README": no commits at all, so
+// the git data API answers 409 until something creates the first one.
+const EMPTY_JSON = {
+  name: 'empty-clips',
+  owner: { login: OWNER },
+  private: false,
+  default_branch: 'main',
+  html_url: `https://github.com/${OWNER}/empty-clips`,
+  permissions: { push: true },
+}
+let emptyInitialised = false
+const emptyCommits = []
+
 const SEED_SHA = 'aaaa1111'
 const SEED = {
   v: 1,
@@ -92,6 +105,19 @@ await context.route('https://api.github.com/**', async (route) => {
   if (path === `/repos/${OWNER}/${REPO}`) return json(REPO_JSON)
   if (path === '/repos/team/shared-clips') return json(SHARED_JSON)
   if (path === '/repos/someone/readonly') return json(READONLY_JSON)
+  if (path === `/repos/${OWNER}/empty-clips`) return json(EMPTY_JSON)
+  if (path.startsWith(`/repos/${OWNER}/empty-clips/`)) {
+    const isEmpty = { message: 'Git Repository is empty.' }
+    if (method === 'PUT' && path.endsWith('/contents/README.md')) {
+      emptyInitialised = true
+      emptyCommits.push('init')
+      return json({ commit: { sha: 'initsha' } }, 201)
+    }
+    if (!emptyInitialised) return json(isEmpty, 409)
+    if (path.endsWith('/git/trees/main'))
+      return json({ tree: [{ path: 'README.md', type: 'blob', sha: 'readme' }], truncated: false })
+    if (method === 'POST' && path.endsWith('/git/commits')) emptyCommits.push('save')
+  }
   // GitHub answers 404 both for a missing repo and for one you cannot see.
   if (/^\/repos\/[^/]+\/[^/]+$/.test(path)) return json({ message: 'Not Found' }, 404)
   if (path.endsWith('/git/trees/main'))
@@ -338,6 +364,20 @@ try {
   await second.getByText(/Can't open team\/nope/).waitFor({ timeout: 10_000 })
   await second.close()
   pass('each tab opens the repo named in its address')
+
+  const fresh = await context.newPage()
+  fresh.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
+  await fresh.goto(`${BASE}${OWNER}/empty-clips`, { waitUntil: 'networkidle' })
+  await fresh.getByText('An empty shelf.').waitFor({ timeout: 10_000 })
+  if ((await fresh.locator('.banner').count()) !== 0)
+    throw new Error('an empty repo should list as empty, not as an error')
+  await fresh.getByPlaceholder(/Type a note/).fill('first note in an empty repo')
+  await fresh.getByRole('button', { name: 'Save', exact: true }).click()
+  await fresh.locator('article.card', { hasText: 'first note in an empty repo' }).waitFor({ timeout: 10_000 })
+  if (emptyCommits.join(',') !== 'init,save')
+    throw new Error(`empty repo: expected a README commit then the save, got ${emptyCommits}`)
+  await fresh.close()
+  pass('a repo with no commits lists as empty and takes its first save')
 
   // A fresh context, because addInitScript would re-seed the token.
   const anon = await browser.newContext()

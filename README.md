@@ -28,6 +28,11 @@ repositories are only ever created under your own account. A private
 repository under another owner still needs the `repo` scope, and an
 organisation may also have to approve the OAuth app before it shows up.
 
+A repository with no commits at all (made on github.com without
+*Add a README*) works too. The git data API refuses an empty
+repository, so the first save lays down a `README.md` through the
+contents API and then commits as usual.
+
 ### One repo per tab
 
 The connected repo is part of the address —
